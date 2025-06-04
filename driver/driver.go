@@ -91,6 +91,9 @@ type Driver struct {
 
 	// logger will log to the Nomad agent
 	logger hclog.Logger
+
+	// virtualizer is the interface for interacting with virtual machines
+	virtualizer Virtualizer
 }
 
 // Config is the driver configuration set by the SetConfig RPC call
@@ -121,6 +124,9 @@ func NewTartDriver(logger hclog.Logger) drivers.DriverPlugin {
 	ctx, cancel := context.WithCancel(context.Background())
 	logger = logger.Named(pluginName)
 
+	// Create a TartClient as our default virtualizer implementation
+	virtualizer := NewTartClient(logger)
+
 	return &Driver{
 		eventer:        eventer.NewEventer(ctx, logger),
 		config:         &Config{},
@@ -128,6 +134,7 @@ func NewTartDriver(logger hclog.Logger) drivers.DriverPlugin {
 		ctx:            ctx,
 		signalShutdown: cancel,
 		logger:         logger,
+		virtualizer:    virtualizer,
 	}
 }
 
@@ -215,8 +222,31 @@ func (d *Driver) buildFingerprint() *drivers.Fingerprint {
 		return fp
 	}
 
-	// TODO: Add actual health checks for the Tart VM system
-	// For now, we'll just assume it's healthy if enabled
+	// Check if virtualization software is installed and accessible
+	ctx, cancel := context.WithTimeout(d.ctx, 5*time.Second)
+	defer cancel()
+
+	if err := d.virtualizer.IsInstalled(ctx); err != nil {
+		d.logger.Warn("failed to find virtualization software", "error", err)
+		fp.Health = drivers.HealthStateUnhealthy
+		fp.HealthDescription = "virtualization software not found"
+		return fp
+	}
+
+	// Get the Tart version and add it as an attribute
+	version, err := d.virtualizer.GetVersion(ctx)
+	if err == nil && version != "" {
+		fp.Attributes["driver.tart.version"] = structs.NewStringAttribute(version)
+	}
+
+	// Try to list VMs to verify virtualization software is working properly
+	_, err = d.virtualizer.ListVMs(ctx)
+	if err != nil {
+		d.logger.Warn("failed to list VMs", "error", err)
+		fp.Health = drivers.HealthStateUnhealthy
+		fp.HealthDescription = fmt.Sprintf("failed to list VMs: %v", err)
+		return fp
+	}
 
 	return fp
 }
