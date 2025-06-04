@@ -9,7 +9,7 @@ job "example-tart" {
       driver = "tart"
 
       config {
-        url = "ghcr.io/cirruslabs/macos-sequoia-xcode:16.4"
+        url = "ghcr.io/cirruslabs/macos-sequoia-vanilla:latest"
         name = "example-vm"
         command = "/bin/echo"
         args    = ["Hello from Tart VM!"]

@@ -26,8 +26,13 @@ func NewTartClient(logger hclog.Logger) *TartClient {
 
 // tartVMInfo is the internal struct for parsing tart JSON output
 type tartVMInfo struct {
-	Name   string `json:"name"`
-	Status string `json:"status"`
+	SizeOnDisk int    `json:"SizeOnDisk"`
+	Name       string `json:"Name"`
+	Running    bool   `json:"Running"`
+	Size       int    `json:"Size"`
+	Disk       int    `json:"Disk"`
+	State      string `json:"State"`
+	Source     string `json:"Source"`
 }
 
 // IsInstalled checks if the tart binary is installed and accessible
@@ -132,7 +137,7 @@ func (c *TartClient) ListVMs(ctx context.Context) ([]VMInfo, error) {
 	for i, vm := range tartVMs {
 		vms[i] = VMInfo{
 			Name:   vm.Name,
-			Status: convertTartStatus(vm.Status),
+			Status: convertTartStatus(vm.State),
 		}
 	}
 
