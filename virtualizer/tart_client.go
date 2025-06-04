@@ -1,4 +1,4 @@
-package driver
+package virtualizer
 
 import (
 	"bytes"
@@ -52,6 +52,22 @@ func (c *TartClient) GetVersion(ctx context.Context) (string, error) {
 	version := strings.TrimSpace(stdout.String())
 	c.logger.Debug("Tart version", "version", version)
 	return version, nil
+}
+
+// SetupVM creates a new Tart VM from a URL
+func (c *TartClient) SetupVM(ctx context.Context, vmName string, url string) error {
+	c.logger.Debug("Setting up Tart VM", "name", vmName, "url", url)
+	cmd := exec.CommandContext(ctx, "tart", "clone", url, vmName)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to create VM %s from URL %s: %v (stderr: %s)",
+			vmName, url, err, stderr.String())
+	}
+
+	return nil
 }
 
 // RunVM starts a Tart VM with the given name

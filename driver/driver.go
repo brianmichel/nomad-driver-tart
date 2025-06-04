@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/brianmichel/nomad-driver-tart/virtualizer"
 	"github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/nomad/drivers/shared/eventer"
 	"github.com/hashicorp/nomad/plugins/base"
@@ -46,14 +47,15 @@ var (
 	// taskConfigSpec is the hcl specification for the driver config section of
 	// a task within a job. It is returned in the TaskConfigSchema RPC
 	taskConfigSpec = hclspec.NewObject(map[string]*hclspec.Spec{
-		"image": hclspec.NewAttr("image", "string", true),
+		"url":  hclspec.NewAttr("url", "string", true),
+		"name": hclspec.NewAttr("name", "string", true),
 		"command": hclspec.NewDefault(
 			hclspec.NewAttr("command", "string", false),
-			hclspec.NewLiteral(""),
+			hclspec.NewLiteral(`""`),
 		),
 		"args": hclspec.NewDefault(
 			hclspec.NewAttr("args", "list(string)", false),
-			hclspec.NewLiteral("[]"),
+			hclspec.NewLiteral(`[]`),
 		),
 	})
 
@@ -93,7 +95,7 @@ type Driver struct {
 	logger hclog.Logger
 
 	// virtualizer is the interface for interacting with virtual machines
-	virtualizer Virtualizer
+	virtualizer virtualizer.Virtualizer
 }
 
 // Config is the driver configuration set by the SetConfig RPC call
@@ -104,7 +106,8 @@ type Config struct {
 
 // TaskConfig is the driver configuration of a task within a job
 type TaskConfig struct {
-	Image   string   `codec:"image"`
+	URL     string   `codec:"url"`
+	Name    string   `codec:"name"`
 	Command string   `codec:"command"`
 	Args    []string `codec:"args"`
 }
@@ -125,7 +128,7 @@ func NewTartDriver(logger hclog.Logger) drivers.DriverPlugin {
 	logger = logger.Named(pluginName)
 
 	// Create a TartClient as our default virtualizer implementation
-	virtualizer := NewTartClient(logger)
+	virtualizer := virtualizer.NewTartClient(logger)
 
 	return &Driver{
 		eventer:        eventer.NewEventer(ctx, logger),
@@ -287,8 +290,14 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		logger:     d.logger,
 	})
 
-	// TODO: Implement actual VM starting logic here
-	// For now, this is just a placeholder
+	// Let the virtualizer do whatever might be needed to set up the VM image to be ready to execute it.
+	if err := d.virtualizer.SetupVM(d.ctx, taskConfig.Name, taskConfig.URL); err != nil {
+		return nil, nil, fmt.Errorf("failed to setup VM: %v", err)
+	}
+
+	if err := d.virtualizer.RunVM(d.ctx, taskConfig.Name, false); err != nil {
+		return nil, nil, fmt.Errorf("failed to run VM: %v", err)
+	}
 
 	// Return a driver handle
 	return handle, nil, nil
@@ -344,7 +353,7 @@ func (d *Driver) handleWait(ctx context.Context, handle *taskHandle, ch chan *dr
 		return
 	case <-d.ctx.Done():
 		return
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second):
 		// Simulate task completion
 		handle.state = drivers.TaskStateExited
 		handle.completedAt = time.Now()
@@ -361,6 +370,10 @@ func (d *Driver) StopTask(taskID string, timeout time.Duration, signal string) e
 	handle, ok := d.tasks.Get(taskID)
 	if !ok {
 		return drivers.ErrTaskNotFound
+	}
+
+	if err := d.virtualizer.StopVM(d.ctx, handle.taskConfig.Name, timeout); err != nil {
+		return fmt.Errorf("failed to stop VM: %v", err)
 	}
 
 	// TODO: Implement actual VM stopping logic
