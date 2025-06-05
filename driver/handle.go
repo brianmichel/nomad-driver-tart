@@ -38,14 +38,14 @@ func (h *taskHandle) TaskStatus() *drivers.TaskStatus {
 	defer h.stateLock.RUnlock()
 
 	status := &drivers.TaskStatus{
-		ID:          h.taskConfig.ID,
-		Name:        h.taskConfig.Name,
-		State:       h.state,
-		StartedAt:   h.startedAt,
-		CompletedAt: h.completedAt,
-		ExitResult:  h.exitResult,
+		ID:               h.taskConfig.ID,
+		Name:             h.taskConfig.Name,
+		State:            h.state,
+		StartedAt:        h.startedAt,
+		CompletedAt:      h.completedAt,
+		ExitResult:       h.exitResult,
 		DriverAttributes: map[string]string{
-			"pid": "0", // Placeholder for now
+			// No custom attributes for now, but something like the task PID could be useful.
 		},
 	}
 
@@ -57,39 +57,4 @@ func (h *taskHandle) IsRunning() bool {
 	h.stateLock.RLock()
 	defer h.stateLock.RUnlock()
 	return h.state == drivers.TaskStateRunning
-}
-
-// taskStore is an in-memory datastore for taskHandles
-type taskStore struct {
-	store map[string]*taskHandle
-	lock  sync.RWMutex
-}
-
-// newTaskStore returns a new task store
-func newTaskStore() *taskStore {
-	return &taskStore{
-		store: map[string]*taskHandle{},
-	}
-}
-
-// Set stores a task handle
-func (ts *taskStore) Set(id string, handle *taskHandle) {
-	ts.lock.Lock()
-	defer ts.lock.Unlock()
-	ts.store[id] = handle
-}
-
-// Get retrieves a task handle
-func (ts *taskStore) Get(id string) (*taskHandle, bool) {
-	ts.lock.RLock()
-	defer ts.lock.RUnlock()
-	handle, ok := ts.store[id]
-	return handle, ok
-}
-
-// Delete removes a task handle
-func (ts *taskStore) Delete(id string) {
-	ts.lock.Lock()
-	defer ts.lock.Unlock()
-	delete(ts.store, id)
 }

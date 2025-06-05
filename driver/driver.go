@@ -11,7 +11,6 @@ import (
 	"github.com/hashicorp/nomad/plugins/base"
 	"github.com/hashicorp/nomad/plugins/drivers"
 	"github.com/hashicorp/nomad/plugins/shared/hclspec"
-	"github.com/hashicorp/nomad/plugins/shared/structs"
 )
 
 const (
@@ -35,35 +34,11 @@ var (
 		Name:              pluginName,
 	}
 
-	// configSpec is the hcl specification returned by the ConfigSchema RPC
-	configSpec = hclspec.NewObject(map[string]*hclspec.Spec{
-		// Config options can be specified here
-		"enabled": hclspec.NewDefault(
-			hclspec.NewAttr("enabled", "bool", false),
-			hclspec.NewLiteral("true"),
-		),
-	})
-
-	// taskConfigSpec is the hcl specification for the driver config section of
-	// a task within a job. It is returned in the TaskConfigSchema RPC
-	taskConfigSpec = hclspec.NewObject(map[string]*hclspec.Spec{
-		"url":  hclspec.NewAttr("url", "string", true),
-		"name": hclspec.NewAttr("name", "string", true),
-		"command": hclspec.NewDefault(
-			hclspec.NewAttr("command", "string", false),
-			hclspec.NewLiteral(`""`),
-		),
-		"args": hclspec.NewDefault(
-			hclspec.NewAttr("args", "list(string)", false),
-			hclspec.NewLiteral(`[]`),
-		),
-	})
-
 	// capabilities is returned by the Capabilities RPC and indicates what
 	// optional features this driver supports
 	capabilities = &drivers.Capabilities{
 		SendSignals: true,
-		Exec:        false,
+		Exec:        true,
 		FSIsolation: drivers.FSIsolationImage,
 	}
 )
@@ -96,20 +71,6 @@ type Driver struct {
 
 	// virtualizer is the interface for interacting with virtual machines
 	virtualizer virtualizer.Virtualizer
-}
-
-// Config is the driver configuration set by the SetConfig RPC call
-type Config struct {
-	// Enabled is set to true to enable the tart driver
-	Enabled bool `codec:"enabled"`
-}
-
-// TaskConfig is the driver configuration of a task within a job
-type TaskConfig struct {
-	URL     string   `codec:"url"`
-	Name    string   `codec:"name"`
-	Command string   `codec:"command"`
-	Args    []string `codec:"args"`
 }
 
 // TaskState is the state which is encoded in the handle returned in
@@ -186,74 +147,6 @@ func (d *Driver) Fingerprint(ctx context.Context) (<-chan *drivers.Fingerprint, 
 	return ch, nil
 }
 
-// handleFingerprint manages the channel and the flow of fingerprint data.
-func (d *Driver) handleFingerprint(ctx context.Context, ch chan<- *drivers.Fingerprint) {
-	defer close(ch)
-
-	// Nomad expects the initial fingerprint to be sent immediately
-	ticker := time.NewTimer(0)
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-d.ctx.Done():
-			return
-		case <-ticker.C:
-			// After the initial fingerprint we can set the proper fingerprint
-			// period
-			ticker.Reset(fingerprintPeriod)
-			ch <- d.buildFingerprint()
-		}
-	}
-}
-
-// buildFingerprint returns the driver's fingerprint data
-func (d *Driver) buildFingerprint() *drivers.Fingerprint {
-	fp := &drivers.Fingerprint{
-		Attributes:        map[string]*structs.Attribute{},
-		Health:            drivers.HealthStateHealthy,
-		HealthDescription: "healthy",
-	}
-
-	// Set driver attributes
-	fp.Attributes["driver.tart"] = structs.NewBoolAttribute(true)
-
-	// Check if the driver is enabled
-	if !d.config.Enabled {
-		fp.Health = drivers.HealthStateUndetected
-		fp.HealthDescription = "disabled"
-		return fp
-	}
-
-	// Check if virtualization software is installed and accessible
-	ctx, cancel := context.WithTimeout(d.ctx, 5*time.Second)
-	defer cancel()
-
-	if err := d.virtualizer.IsInstalled(ctx); err != nil {
-		d.logger.Warn("failed to find virtualization software", "error", err)
-		fp.Health = drivers.HealthStateUnhealthy
-		fp.HealthDescription = "virtualization software not found"
-		return fp
-	}
-
-	// Get the Tart version and add it as an attribute
-	version, err := d.virtualizer.GetVersion(ctx)
-	if err == nil && version != "" {
-		fp.Attributes["driver.tart.version"] = structs.NewStringAttribute(version)
-	}
-
-	// Try to list VMs to verify virtualization software is working properly
-	_, err = d.virtualizer.ListVMs(ctx)
-	if err != nil {
-		d.logger.Warn("failed to list VMs", "error", err)
-		fp.Health = drivers.HealthStateUnhealthy
-		fp.HealthDescription = fmt.Sprintf("failed to list VMs: %v", err)
-		return fp
-	}
-
-	return fp
-}
-
 // StartTask returns a task handle and a driver network if necessary.
 func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drivers.DriverNetwork, error) {
 	if _, ok := d.tasks.Get(cfg.ID); ok {
@@ -265,7 +158,7 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		return nil, nil, fmt.Errorf("failed to decode driver config: %v", err)
 	}
 
-	d.logger.Info("starting tart task", "driver_cfg", hclog.Fmt("%+v", taskConfig))
+	d.logger.Info("starting tart task", "task_cfg", hclog.Fmt("%+v", taskConfig))
 	handle := drivers.NewTaskHandle(taskHandleVersion)
 	handle.Config = cfg
 
@@ -304,30 +197,30 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 }
 
 // RecoverTask recreates the in-memory state of a task from a TaskHandle.
-func (d *Driver) RecoverTask(handle *drivers.TaskHandle) error {
-	if handle == nil {
+func (d *Driver) RecoverTask(h *drivers.TaskHandle) error {
+	if h == nil {
 		return fmt.Errorf("error: handle cannot be nil")
 	}
 
-	if handle.Version != taskHandleVersion {
-		return fmt.Errorf("error: incompatible handle version of %d", handle.Version)
+	if h.Version != taskHandleVersion {
+		return fmt.Errorf("error: incompatible handle version of %d", h.Version)
 	}
 
 	var taskState TaskState
-	if err := handle.GetDriverState(&taskState); err != nil {
+	if err := h.GetDriverState(&taskState); err != nil {
 		return fmt.Errorf("failed to decode task state from handle: %v", err)
 	}
 
 	// TODO: Implement task recovery logic
 	// For now, just create a basic task handle
-	d.tasks.Set(handle.Config.ID, &taskHandle{
+	d.tasks.Set(h.Config.ID, &taskHandle{
 		taskConfig: taskState.TaskConfig,
 		state:      drivers.TaskStateRunning,
 		startedAt:  taskState.StartedAt,
 		logger:     d.logger,
 	})
 
-	d.logger.Info("recovered tart task", "task_id", handle.Config.ID)
+	d.logger.Info("recovered tart task", "task_id", h.Config.ID)
 	return nil
 }
 
@@ -341,103 +234,6 @@ func (d *Driver) WaitTask(ctx context.Context, taskID string) (<-chan *drivers.E
 	ch := make(chan *drivers.ExitResult)
 	go d.handleWait(ctx, handle, ch)
 	return ch, nil
-}
-
-func (d *Driver) handleWait(ctx context.Context, handle *taskHandle, ch chan *drivers.ExitResult) {
-	defer close(ch)
-
-	// Extract the VM name from the task config by decoding the driver config
-	var taskConfig TaskConfig
-	if err := handle.taskConfig.DecodeDriverConfig(&taskConfig); err != nil {
-		d.logger.Error("failed to decode driver config", "error", err)
-		ch <- &drivers.ExitResult{
-			ExitCode: 1,
-			Signal:   0,
-			Err:      fmt.Errorf("failed to decode driver config: %v", err),
-		}
-		return
-	}
-
-	vmName := taskConfig.Name
-	d.logger.Debug("monitoring VM status", "vm_name", vmName)
-
-	// Poll interval for checking VM status
-	pollInterval := 5 * time.Second
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			d.logger.Debug("context cancelled, stopping VM monitoring", "vm_name", vmName)
-			return
-		case <-d.ctx.Done():
-			d.logger.Debug("driver context cancelled, stopping VM monitoring", "vm_name", vmName)
-			return
-		case <-ticker.C:
-			// Check the VM status
-			status, err := d.virtualizer.GetVMStatus(ctx, vmName)
-			if err != nil {
-				d.logger.Warn("failed to get VM status, assuming VM is stopped", "vm_name", vmName, "error", err)
-				// If we can't get the status, assume the VM has exited with an error
-				handle.stateLock.Lock()
-				handle.state = drivers.TaskStateExited
-				handle.completedAt = time.Now()
-				handle.exitResult = &drivers.ExitResult{
-					ExitCode: 1,
-					Signal:   0,
-					Err:      fmt.Errorf("failed to get VM status: %v", err),
-				}
-				exitResult := handle.exitResult
-				handle.stateLock.Unlock()
-
-				ch <- exitResult
-				return
-			}
-
-			// If the VM is not running, it has exited
-			if status != virtualizer.VMStateRunning {
-				// Before assuming the VM is stopped, try to get the status one more time
-				// to avoid false negatives from transient issues
-				time.Sleep(1 * time.Second)
-				status, err = d.virtualizer.GetVMStatus(ctx, vmName)
-				if err == nil && status == virtualizer.VMStateRunning {
-					d.logger.Debug("VM is actually running after second check", "vm_name", vmName)
-					continue
-				}
-
-				// For Tart VMs, if we're running a command that completes quickly,
-				// the VM might still be considered "running" from Nomad's perspective
-				// even if the command inside has completed.
-				// We'll consider this a successful completion of the task.
-				d.logger.Info("VM is no longer running", "vm_name", vmName, "status", status)
-
-				handle.stateLock.Lock()
-				handle.state = drivers.TaskStateExited
-				handle.completedAt = time.Now()
-
-				// Assume successful exit if the VM stopped normally
-				exitCode := 0
-				if status != virtualizer.VMStateStopped {
-					// If it's in any other state (like paused or error), consider it an abnormal exit
-					exitCode = 1
-				}
-
-				handle.exitResult = &drivers.ExitResult{
-					ExitCode: exitCode,
-					Signal:   0,
-				}
-				exitResult := handle.exitResult
-				handle.stateLock.Unlock()
-
-				ch <- exitResult
-				return
-			}
-
-			// VM is still running, continue monitoring
-			d.logger.Debug("VM still running", "vm_name", vmName, "status", status)
-		}
-	}
 }
 
 // StopTask stops a running task with the given signal and within the timeout window.
@@ -512,36 +308,6 @@ func (d *Driver) TaskStats(ctx context.Context, taskID string, interval time.Dur
 	ch := make(chan *drivers.TaskResourceUsage)
 	go d.handleStats(ctx, ch, interval)
 	return ch, nil
-}
-
-func (d *Driver) handleStats(ctx context.Context, ch chan *drivers.TaskResourceUsage, interval time.Duration) {
-	defer close(ch)
-	timer := time.NewTimer(0)
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-d.ctx.Done():
-			return
-		case <-timer.C:
-			// Send placeholder stats
-			ch <- &drivers.TaskResourceUsage{
-				ResourceUsage: &drivers.ResourceUsage{
-					MemoryStats: &drivers.MemoryStats{
-						RSS:      0,
-						Measured: []string{"RSS"},
-					},
-					CpuStats: &drivers.CpuStats{
-						SystemMode: 0,
-						UserMode:   0,
-						Measured:   []string{"System Mode", "User Mode"},
-					},
-				},
-				Timestamp: time.Now().UTC().UnixNano(),
-			}
-			timer.Reset(interval)
-		}
-	}
 }
 
 // TaskEvents returns a channel that the plugin can use to emit task related events.
