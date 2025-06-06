@@ -76,7 +76,7 @@ func (c *TartClient) SetupVM(ctx context.Context, vmName string, url string) err
 }
 
 // RunVM starts a Tart VM with the given name
-func (c *TartClient) RunVM(ctx context.Context, vmName string, headless bool) error {
+func (c *TartClient) RunVM(ctx context.Context, vmName string, headless bool) (int, error) {
 	args := []string{"run", vmName}
 	if headless {
 		args = append(args, "--no-graphics")
@@ -89,11 +89,11 @@ func (c *TartClient) RunVM(ctx context.Context, vmName string, headless bool) er
 	cmd.Stderr = &stderr
 
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start VM %s: %v", vmName, err)
+		return -1, fmt.Errorf("failed to start VM %s: %v", vmName, err)
 	}
 
 	// Don't wait for the command to complete as it will block until the VM is stopped
-	return nil
+	return cmd.Process.Pid, nil
 }
 
 // StopVM stops a running Tart VM

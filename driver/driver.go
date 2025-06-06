@@ -162,6 +162,16 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	handle := drivers.NewTaskHandle(taskHandleVersion)
 	handle.Config = cfg
 
+	// Let the virtualizer do whatever might be needed to set up the VM image to be ready to execute it.
+	if err := d.virtualizer.SetupVM(d.ctx, taskConfig.Name, taskConfig.URL); err != nil {
+		return nil, nil, fmt.Errorf("failed to setup VM: %v", err)
+	}
+
+	pid, err := d.virtualizer.RunVM(d.ctx, taskConfig.Name, false)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to run VM: %v", err)
+	}
+
 	// Store the driver state on the handle
 	state := TaskState{
 		TaskConfig: cfg,
@@ -170,27 +180,19 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 
 	handle.State = drivers.TaskStateRunning
 
-	// Store the task in the in-memory datastore
-	d.tasks.Set(cfg.ID, &taskHandle{
-		taskConfig: cfg,
-		state:      drivers.TaskStateRunning,
-		startedAt:  time.Now(),
-		logger:     d.logger,
-	})
-
 	// Encode the driver state
 	if err := handle.SetDriverState(&state); err != nil {
 		return nil, nil, fmt.Errorf("failed to set driver state: %v", err)
 	}
 
-	// Let the virtualizer do whatever might be needed to set up the VM image to be ready to execute it.
-	if err := d.virtualizer.SetupVM(d.ctx, taskConfig.Name, taskConfig.URL); err != nil {
-		return nil, nil, fmt.Errorf("failed to setup VM: %v", err)
-	}
-
-	if err := d.virtualizer.RunVM(d.ctx, taskConfig.Name, false); err != nil {
-		return nil, nil, fmt.Errorf("failed to run VM: %v", err)
-	}
+	// Store the task in the in-memory datastore
+	d.tasks.Set(cfg.ID, &taskHandle{
+		taskConfig: cfg,
+		taskPid:    pid,
+		state:      drivers.TaskStateRunning,
+		startedAt:  time.Now(),
+		logger:     d.logger,
+	})
 
 	// Return a driver handle
 	return handle, nil, nil
@@ -298,15 +300,15 @@ func (d *Driver) InspectTask(taskID string) (*drivers.TaskStatus, error) {
 
 // TaskStats returns a channel which the driver should send stats to at the given interval.
 func (d *Driver) TaskStats(ctx context.Context, taskID string, interval time.Duration) (<-chan *drivers.TaskResourceUsage, error) {
-	_, ok := d.tasks.Get(taskID)
+	h, ok := d.tasks.Get(taskID)
 	if !ok {
 		return nil, drivers.ErrTaskNotFound
 	}
-
+	d.logger.Info("collecting stats for tart task", "task_id", taskID)
 	// TODO: Implement actual VM stats collection
 	// For now, just return a placeholder
 	ch := make(chan *drivers.TaskResourceUsage)
-	go d.handleStats(ctx, ch, interval)
+	go h.handleStats(ctx, ch, interval)
 	return ch, nil
 }
 

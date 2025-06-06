@@ -40,6 +40,7 @@ func (d *Driver) buildFingerprint() *drivers.Fingerprint {
 
 	// Set driver attributes
 	fp.Attributes["driver.tart"] = structs.NewBoolAttribute(true)
+	fp.Attributes["driver.tart.available_slots"] = structs.NewIntAttribute(0, "")
 
 	// Check if the driver is enabled
 	if !d.config.Enabled {

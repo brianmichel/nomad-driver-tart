@@ -41,7 +41,7 @@ type Virtualizer interface {
 	GetVMStatus(ctx context.Context, vmName string) (VMState, error)
 
 	// RunVM starts a virtual machine
-	RunVM(ctx context.Context, vmName string, headless bool) error
+	RunVM(ctx context.Context, vmName string, headless bool) (int, error)
 
 	// StopVM stops a running virtual machine
 	StopVM(ctx context.Context, vmName string, timeout time.Duration) error

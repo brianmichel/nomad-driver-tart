@@ -1,10 +1,11 @@
 module github.com/brianmichel/nomad-driver-tart
 
-go 1.20
+go 1.23.6
 
 require (
 	github.com/hashicorp/go-hclog v1.5.0
 	github.com/hashicorp/nomad v1.6.1
+	github.com/shirou/gopsutil/v3 v3.23.4
 )
 
 require (
@@ -71,7 +72,6 @@ require (
 	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
 	github.com/ryanuber/go-glob v1.0.0 // indirect
 	github.com/sean-/seed v0.0.0-20170313163322-e2103e2c3529 // indirect
-	github.com/shirou/gopsutil/v3 v3.23.4 // indirect
 	github.com/shoenig/go-m1cpu v0.1.6 // indirect
 	github.com/tklauser/go-sysconf v0.3.11 // indirect
 	github.com/tklauser/numcpus v0.6.0 // indirect
