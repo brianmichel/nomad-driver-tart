@@ -227,9 +227,14 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		return nil, nil, fmt.Errorf("failed to create executor: %v", err)
 	}
 
+	args := []string{"run", allocVMName}
+	if !taskConfig.ShowUI {
+		args = append(args, "--no-graphics")
+	}
+
 	execCmd := &executor.ExecCommand{
 		Cmd:              "tart",
-		Args:             []string{"run", allocVMName},
+		Args:             args,
 		Env:              cfg.EnvList(),
 		User:             cfg.User,
 		TaskDir:          cfg.TaskDir().Dir,
