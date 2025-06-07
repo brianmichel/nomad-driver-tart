@@ -13,6 +13,7 @@ type TaskConfig struct {
 	URL         string `codec:"url"`
 	SSHUser     string `codec:"ssh_user"`
 	SSHPassword string `codec:"ssh_password"`
+	ShowUI      bool   `codec:"show_ui"`
 }
 
 var (
@@ -31,5 +32,6 @@ var (
 		"url":          hclspec.NewAttr("url", "string", true),
 		"ssh_user":     hclspec.NewAttr("ssh_user", "string", true),
 		"ssh_password": hclspec.NewAttr("ssh_password", "string", true),
+		"show_ui":      hclspec.NewDefault(hclspec.NewAttr("show_ui", "bool", false), hclspec.NewLiteral("false")),
 	})
 )
