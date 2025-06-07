@@ -25,6 +25,8 @@ To build the driver plugin:
 
 ```bash
 make build
+# Cross compile for Apple Silicon
+GOOS=darwin GOARCH=arm64 make build
 ```
 
 This will create a `nomad-driver-tart` binary in the project root.
@@ -127,6 +129,11 @@ This driver is currently in development and provides basic functionality. Future
 - Network configuration
 - Volume mounts
 - Health checking
+
+### Continuous Integration
+
+A GitHub Actions workflow automatically formats, vets, and builds the driver for darwin/arm64 on every pull request and push to `main`. Tagging a commit with `v*` also uploads the built binary as a release artifact.
+
 
 ## License
 
