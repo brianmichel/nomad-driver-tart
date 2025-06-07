@@ -3,6 +3,7 @@ package driver
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -200,6 +201,22 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 
 	if err := d.virtualizer.SetupVM(d.ctx, allocVMName, taskConfig.URL); err != nil {
 		return nil, nil, fmt.Errorf("failed to setup VM: %v", err)
+	}
+
+	// Configure VM resources before starting it using the Nomad resources block
+	var cpuCores, memoryMB int
+	if cfg.Resources != nil && cfg.Resources.NomadResources != nil {
+		cpuShares := cfg.Resources.NomadResources.Cpu.CpuShares
+		if cpuShares > 0 {
+			cpuCores = int(math.Ceil(float64(cpuShares) / 1000.0))
+		}
+		memoryMB = int(cfg.Resources.NomadResources.Memory.MemoryMB)
+	}
+
+	diskGB := taskConfig.DiskSize
+
+	if err := d.virtualizer.SetVMResources(d.ctx, allocVMName, cpuCores, memoryMB, diskGB); err != nil {
+		return nil, nil, fmt.Errorf("failed to set VM resources: %v", err)
 	}
 
 	if !vmExists {
