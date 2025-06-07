@@ -3,11 +3,14 @@ package driver
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/brianmichel/nomad-driver-tart/virtualizer"
 	"github.com/hashicorp/go-hclog"
+	plugin "github.com/hashicorp/go-plugin"
 	"github.com/hashicorp/nomad/drivers/shared/eventer"
+	"github.com/hashicorp/nomad/drivers/shared/executor"
 	"github.com/hashicorp/nomad/plugins/base"
 	"github.com/hashicorp/nomad/plugins/drivers"
 	"github.com/hashicorp/nomad/plugins/shared/hclspec"
@@ -167,9 +170,33 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		return nil, nil, fmt.Errorf("failed to setup VM: %v", err)
 	}
 
-	pid, err := d.virtualizer.RunVM(d.ctx, taskConfig.Name, false)
+	pluginLogFile := filepath.Join(cfg.TaskDir().Dir, "executor.out")
+	execConfig := &executor.ExecutorConfig{
+		LogFile:  pluginLogFile,
+		LogLevel: "debug",
+	}
+
+	logger := d.logger.With("task_name", handle.Config.Name, "alloc_id", handle.Config.AllocID)
+	execImpl, pluginClient, err := executor.CreateExecutor(logger, d.nomadConfig, execConfig)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to run VM: %v", err)
+		return nil, nil, fmt.Errorf("failed to create executor: %v", err)
+	}
+
+	execCmd := &executor.ExecCommand{
+		Cmd:              "tart",
+		Args:             []string{"run", taskConfig.Name},
+		Env:              cfg.EnvList(),
+		User:             cfg.User,
+		TaskDir:          cfg.TaskDir().Dir,
+		StdoutPath:       cfg.StdoutPath,
+		StderrPath:       cfg.StderrPath,
+		NetworkIsolation: cfg.NetworkIsolation,
+	}
+
+	ps, err := execImpl.Launch(execCmd)
+	if err != nil {
+		pluginClient.Kill()
+		return nil, nil, fmt.Errorf("failed to launch VM: %v", err)
 	}
 
 	// Store the driver state on the handle
@@ -182,17 +209,23 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 
 	// Encode the driver state
 	if err := handle.SetDriverState(&state); err != nil {
+		execImpl.Shutdown("", 0)
+		pluginClient.Kill()
 		return nil, nil, fmt.Errorf("failed to set driver state: %v", err)
 	}
 
-	// Store the task in the in-memory datastore
-	d.tasks.Set(cfg.ID, &taskHandle{
-		taskConfig: cfg,
-		taskPid:    pid,
-		state:      drivers.TaskStateRunning,
-		startedAt:  time.Now(),
-		logger:     d.logger,
-	})
+	h := &taskHandle{
+		exec:         execImpl,
+		pluginClient: pluginClient,
+		pid:          ps.Pid,
+		taskConfig:   cfg,
+		state:        drivers.TaskStateRunning,
+		startedAt:    time.Now().Round(time.Millisecond),
+		logger:       d.logger,
+		doneCh:       make(chan struct{}),
+	}
+	d.tasks.Set(cfg.ID, h)
+	go h.run()
 
 	// Return a driver handle
 	return handle, nil, nil
@@ -245,26 +278,23 @@ func (d *Driver) StopTask(taskID string, timeout time.Duration, signal string) e
 		return drivers.ErrTaskNotFound
 	}
 
-	// Extract the VM name from the task config by decoding the driver config
+	// Attempt to gracefully stop the VM via the virtualizer
 	var taskConfig TaskConfig
-	if err := handle.taskConfig.DecodeDriverConfig(&taskConfig); err != nil {
-		d.logger.Error("failed to decode driver config", "error", err)
+	if err := handle.taskConfig.DecodeDriverConfig(&taskConfig); err == nil {
+		if err := d.virtualizer.StopVM(d.ctx, taskConfig.Name, timeout); err != nil {
+			d.logger.Warn("failed to stop VM via virtualizer", "error", err)
+		}
 	}
 
-	vmName := taskConfig.Name
-
-	if err := d.virtualizer.StopVM(d.ctx, vmName, timeout); err != nil {
-		return fmt.Errorf("failed to stop VM: %v", err)
+	if err := handle.exec.Shutdown(signal, timeout); err != nil {
+		if handle.pluginClient != nil && handle.pluginClient.Exited() {
+			return nil
+		}
+		return fmt.Errorf("executor Shutdown failed: %v", err)
 	}
 
-	// TODO: Implement actual VM stopping logic
-	// For now, just update the task state
-	handle.state = drivers.TaskStateExited
-	handle.completedAt = time.Now()
-	handle.exitResult = &drivers.ExitResult{
-		ExitCode: 0,
-		Signal:   0,
-	}
+	<-handle.doneCh
+	handle.pluginClient.Kill()
 
 	d.logger.Info("stopped tart task", "task_id", taskID)
 	return nil
@@ -281,8 +311,13 @@ func (d *Driver) DestroyTask(taskID string, force bool) error {
 		return fmt.Errorf("cannot destroy running task")
 	}
 
-	// TODO: Implement actual VM cleanup logic
-	// For now, just remove the task from the store
+	if !handle.pluginClient.Exited() {
+		if err := handle.exec.Shutdown("", 0); err != nil {
+			handle.logger.Error("destroying executor failed", "error", err)
+		}
+		handle.pluginClient.Kill()
+	}
+
 	d.tasks.Delete(taskID)
 	d.logger.Info("destroyed tart task", "task_id", taskID)
 	return nil
@@ -304,12 +339,7 @@ func (d *Driver) TaskStats(ctx context.Context, taskID string, interval time.Dur
 	if !ok {
 		return nil, drivers.ErrTaskNotFound
 	}
-	d.logger.Info("collecting stats for tart task", "task_id", taskID)
-	// TODO: Implement actual VM stats collection
-	// For now, just return a placeholder
-	ch := make(chan *drivers.TaskResourceUsage)
-	go h.handleStats(ctx, ch, interval)
-	return ch, nil
+	return h.exec.Stats(ctx, interval)
 }
 
 // TaskEvents returns a channel that the plugin can use to emit task related events.
