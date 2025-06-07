@@ -7,8 +7,9 @@ import (
 	"time"
 
 	"github.com/hashicorp/go-hclog"
+	plugin "github.com/hashicorp/go-plugin"
+	"github.com/hashicorp/nomad/drivers/shared/executor"
 	"github.com/hashicorp/nomad/plugins/drivers"
-	"github.com/shirou/gopsutil/v3/process"
 )
 
 // taskHandle is a handle to a running task
@@ -22,8 +23,14 @@ type taskHandle struct {
 	// state is the state of the task
 	state drivers.TaskState
 
-	// taskPid is the PID of the task
-	taskPid int
+	// pid is the PID of the task
+	pid int
+
+	// exec is the Nomad executor managing the task process
+	exec executor.Executor
+
+	// pluginClient is the go-plugin client associated with the executor
+	pluginClient *plugin.Client
 
 	// startedAt is when the task was started
 	startedAt time.Time
@@ -36,6 +43,9 @@ type taskHandle struct {
 
 	// logger is the logger for the task
 	logger hclog.Logger
+
+	// doneCh is closed when the task has finished executing
+	doneCh chan struct{}
 }
 
 // TaskStatus returns the current status of the task
@@ -52,78 +62,11 @@ func (h *taskHandle) TaskStatus() *drivers.TaskStatus {
 		ExitResult:  h.exitResult,
 		DriverAttributes: map[string]string{
 			// No custom attributes for now, but something like the task PID could be useful.
-			"pid": fmt.Sprintf("%d", h.taskPid),
+			"pid": fmt.Sprintf("%d", h.pid),
 		},
 	}
 
 	return status
-}
-
-func (h *taskHandle) handleStats(ctx context.Context, ch chan *drivers.TaskResourceUsage, interval time.Duration) {
-	defer close(ch)
-	timer := time.NewTimer(0)
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-timer.C:
-			h.logger.Debug("collecting stats for tart task")
-			// Send placeholder stats
-			h.stateLock.RLock()
-			pid := h.taskPid
-			h.stateLock.RUnlock()
-
-			if pid <= 0 {
-				h.logger.Error("invalid pid", "pid", pid)
-				continue
-			}
-
-			proc, err := process.NewProcess(int32(pid))
-			if err != nil {
-				h.logger.Error("failed to open process for pid", "pid", pid, "error", err)
-				continue
-			}
-
-			memInfo, err := proc.MemoryInfo()
-			if err != nil {
-				h.logger.Error("failed to get memory info for pid", "pid", pid, "error", err)
-			}
-
-			cpuTimes, err := proc.Times()
-			if err != nil {
-				h.logger.Error("failed to get cpu times for pid", "pid", pid, "error", err)
-				continue
-			}
-
-			cpuPercent, err := proc.CPUPercent()
-			if err != nil {
-				h.logger.Error("failed to get cpu percent for pid", "pid", pid, "error", err)
-				continue
-			}
-
-			h.logger.Debug("collected stats for tart task", "cpu_times", cpuTimes, "cpu_percent", cpuPercent)
-
-			stats := &drivers.TaskResourceUsage{
-				ResourceUsage: &drivers.ResourceUsage{
-					MemoryStats: &drivers.MemoryStats{
-						RSS:      uint64(memInfo.RSS),
-						Measured: []string{"RSS"},
-					},
-					CpuStats: &drivers.CpuStats{
-						SystemMode: cpuTimes.System * float64(time.Second),
-						UserMode:   cpuTimes.User * float64(time.Second),
-						Measured:   []string{"System Mode", "User Mode"},
-						// CPUPercent already returns a percentage value in the range
-						// [0,100] across all CPUs. Avoid scaling it again.
-						Percent: cpuPercent,
-					},
-				},
-				Timestamp: time.Now().UTC().UnixNano(),
-			}
-			ch <- stats
-			timer.Reset(interval)
-		}
-	}
 }
 
 // IsRunning returns whether the task is running
@@ -131,4 +74,32 @@ func (h *taskHandle) IsRunning() bool {
 	h.stateLock.RLock()
 	defer h.stateLock.RUnlock()
 	return h.state == drivers.TaskStateRunning
+}
+
+// run waits on the executor and updates the task state when the process exits.
+func (h *taskHandle) run() {
+	defer close(h.doneCh)
+
+	h.stateLock.Lock()
+	if h.exitResult == nil {
+		h.exitResult = &drivers.ExitResult{}
+	}
+	h.stateLock.Unlock()
+
+	ps, err := h.exec.Wait(context.Background())
+
+	h.stateLock.Lock()
+	defer h.stateLock.Unlock()
+
+	if err != nil {
+		h.exitResult.Err = err
+		h.state = drivers.TaskStateUnknown
+		h.completedAt = time.Now()
+		return
+	}
+
+	h.state = drivers.TaskStateExited
+	h.exitResult.ExitCode = ps.ExitCode
+	h.exitResult.Signal = ps.Signal
+	h.completedAt = ps.Time
 }
