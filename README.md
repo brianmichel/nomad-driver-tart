@@ -162,4 +162,5 @@ A GitHub Actions workflow automatically formats, vets, and builds the driver for
 ## License
 
 See [LICENSE](LICENSE) file.
-An experimental task driver for Nomad using the Tart virtualization tool.
+
+Tart's [LICENSE](https://github.com/cirruslabs/tart/blob/main/LICENSE) still applies to your usage of the underlying program. 
