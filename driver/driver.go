@@ -164,9 +164,46 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	handle := drivers.NewTaskHandle(taskHandleVersion)
 	handle.Config = cfg
 
-	// Let the virtualizer do whatever might be needed to set up the VM image to be ready to execute it.
-	if err := d.virtualizer.SetupVM(d.ctx, taskConfig.Name, taskConfig.URL); err != nil {
-		return nil, nil, fmt.Errorf("failed to setup VM: %v", err)
+	// Check if the VM already exists before attempting a download
+	vms, err := d.virtualizer.ListVMs(d.ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to list VMs: %v", err)
+	}
+
+	vmExists := false
+	for _, vm := range vms {
+		if vm.Name == taskConfig.Name {
+			vmExists = true
+			break
+		}
+	}
+
+	if !vmExists {
+		d.logger.Info("VM image not found locally, downloading", "name", taskConfig.Name, "url", taskConfig.URL)
+		d.eventer.EmitEvent(&drivers.TaskEvent{
+			TaskID:    cfg.ID,
+			TaskName:  cfg.Name,
+			AllocID:   cfg.AllocID,
+			Timestamp: time.Now(),
+			Message:   "Downloading VM image",
+			Annotations: map[string]string{
+				"url": taskConfig.URL,
+			},
+		})
+
+		if err := d.virtualizer.SetupVM(d.ctx, taskConfig.Name, taskConfig.URL); err != nil {
+			return nil, nil, fmt.Errorf("failed to setup VM: %v", err)
+		}
+
+		d.eventer.EmitEvent(&drivers.TaskEvent{
+			TaskID:    cfg.ID,
+			TaskName:  cfg.Name,
+			AllocID:   cfg.AllocID,
+			Timestamp: time.Now(),
+			Message:   "VM image download complete",
+		})
+	} else {
+		d.logger.Info("VM image already present", "name", taskConfig.Name)
 	}
 
 	pluginLogFile := filepath.Join(cfg.TaskDir().Dir, "executor.out")
