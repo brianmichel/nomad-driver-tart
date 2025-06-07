@@ -8,7 +8,6 @@ import (
 
 	"github.com/brianmichel/nomad-driver-tart/virtualizer"
 	"github.com/hashicorp/go-hclog"
-	plugin "github.com/hashicorp/go-plugin"
 	"github.com/hashicorp/nomad/drivers/shared/eventer"
 	"github.com/hashicorp/nomad/drivers/shared/executor"
 	"github.com/hashicorp/nomad/plugins/base"
