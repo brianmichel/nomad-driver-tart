@@ -398,7 +398,10 @@ func (d *Driver) TaskStats(ctx context.Context, taskID string, interval time.Dur
 	if !ok {
 		return nil, drivers.ErrTaskNotFound
 	}
-	return h.exec.Stats(ctx, interval)
+
+	ch := make(chan *drivers.TaskResourceUsage)
+	go d.collectStats(ctx, h, interval, ch)
+	return ch, nil
 }
 
 // TaskEvents returns a channel that the plugin can use to emit task related events.
