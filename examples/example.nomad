@@ -32,6 +32,9 @@ EOH
         url          = "ghcr.io/cirruslabs/macos-sequoia-vanilla:latest"
         ssh_user     = "admin"
         ssh_password = "${SSH_PASSWORD}"
+        # Whether or not to show the built-in Tart UI for the VM
+        # Defaults to false
+        show_ui      = true
       }
 
       resources {
