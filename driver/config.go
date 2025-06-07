@@ -10,10 +10,12 @@ type Config struct {
 
 // TaskConfig is the driver configuration of a task within a job
 type TaskConfig struct {
-	URL     string   `codec:"url"`
-	Name    string   `codec:"name"`
-	Command string   `codec:"command"`
-	Args    []string `codec:"args"`
+	URL         string   `codec:"url"`
+	Name        string   `codec:"name"`
+	Command     string   `codec:"command"`
+	Args        []string `codec:"args"`
+	SSHUser     string   `codec:"ssh_user"`
+	SSHPassword string   `codec:"ssh_password"`
 }
 
 var (
@@ -39,5 +41,10 @@ var (
 			hclspec.NewAttr("args", "list(string)", false),
 			hclspec.NewLiteral(`[]`),
 		),
+		"ssh_user": hclspec.NewDefault(
+			hclspec.NewAttr("ssh_user", "string", false),
+			hclspec.NewLiteral(`"admin"`),
+		),
+		"ssh_password": hclspec.NewAttr("ssh_password", "string", false),
 	})
 )

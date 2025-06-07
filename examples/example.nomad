@@ -17,11 +17,24 @@ job "example-tart" {
     task "tart-vm" {
       driver = "tart"
 
+      # Setup password with a secure Nomad var
+      # Example:
+      #   nomad var put nomad/jobs/example-tart ssh_password="your VM password"
+      template {
+        data        = <<EOH
+SSH_PASSWORD={{ with nomadVar "nomad/jobs/example-tart" }}{{ .ssh_password }}{{ end }}
+EOH
+        destination = "secrets/file.env"
+        env         = true
+      }
+
       config {
-        url = "ghcr.io/cirruslabs/macos-sequoia-vanilla:latest"
-        name = "example-vm"
-        command = "/bin/echo"
-        args    = ["Hello from Tart VM!"]
+        url          = "ghcr.io/cirruslabs/macos-sequoia-vanilla:latest"
+        name         = "example-vm"
+        ssh_user     = "admin"
+        ssh_password = "${SSH_PASSWORD}"
+        command      = "/bin/echo"
+        args         = ["Hello from Tart VM!"]
       }
 
       resources {

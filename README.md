@@ -12,6 +12,7 @@ This driver allows Nomad to manage the lifecycle of Tart VMs, providing a way to
 - Task status reporting
 - Signal forwarding to tasks
 - Placeholder for resource usage statistics
+- Syslog streaming from VMs via SSH
 
 ## Requirements
 
@@ -84,10 +85,12 @@ job "example-tart" {
       driver = "tart"
 
       config {
-        url = "ghcr.io/cirruslabs/macos-sequoia-vanilla:latest"
-        name = "example-vm"
-        command = "/bin/echo"
-        args    = ["Hello from Tart VM!"]
+        url          = "ghcr.io/cirruslabs/macos-sequoia-vanilla:latest"
+        name         = "example-vm"
+        ssh_user     = "admin"
+        ssh_password = "changeme"
+        command      = "/bin/echo"
+        args         = ["Hello from Tart VM!"]
       }
 
       resources {
