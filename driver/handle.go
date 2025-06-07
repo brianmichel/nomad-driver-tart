@@ -113,7 +113,9 @@ func (h *taskHandle) handleStats(ctx context.Context, ch chan *drivers.TaskResou
 						SystemMode: cpuTimes.System * float64(time.Second),
 						UserMode:   cpuTimes.User * float64(time.Second),
 						Measured:   []string{"System Mode", "User Mode"},
-						Percent:    cpuPercent * 100,
+						// CPUPercent already returns a percentage value in the range
+						// [0,100] across all CPUs. Avoid scaling it again.
+						Percent: cpuPercent,
 					},
 				},
 				Timestamp: time.Now().UTC().UnixNano(),
