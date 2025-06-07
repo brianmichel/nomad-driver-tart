@@ -3,6 +3,8 @@ package driver
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -260,6 +262,9 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		logger:       d.logger,
 		doneCh:       make(chan struct{}),
 	}
+	syslogCtx, cancel := context.WithCancel(d.ctx)
+	h.syslogCancel = cancel
+	go d.streamSyslog(syslogCtx, taskConfig.Name, taskConfig.SSHUser, taskConfig.SSHPassword, cfg.StdoutPath, cfg.StderrPath)
 	d.tasks.Set(cfg.ID, h)
 	go h.run()
 
@@ -404,4 +409,44 @@ func (d *Driver) ExecTask(taskID string, cmd []string, timeout time.Duration) (*
 
 	// Exec is not supported
 	return nil, fmt.Errorf("exec is not supported by the tart driver")
+}
+
+// streamSyslog streams a VM's syslog output to the given stdout/stderr files.
+func (d *Driver) streamSyslog(ctx context.Context, vmName, user, password, stdoutPath, stderrPath string) {
+	ip, err := d.virtualizer.IPAddress(ctx, vmName)
+	for i := 0; i < 5 && (err != nil || ip == ""); i++ {
+		time.Sleep(2 * time.Second)
+		ip, err = d.virtualizer.IPAddress(ctx, vmName)
+	}
+	if err != nil || ip == "" {
+		d.logger.Error("failed to get VM IP for syslog streaming", "vm", vmName, "err", err)
+		return
+	}
+
+	stdoutFile, err := os.OpenFile(stdoutPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		d.logger.Error("failed to open stdout file", "err", err)
+		return
+	}
+	defer stdoutFile.Close()
+
+	stderrFile, err := os.OpenFile(stderrPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		d.logger.Error("failed to open stderr file", "err", err)
+		return
+	}
+	defer stderrFile.Close()
+
+	cmd := exec.CommandContext(ctx, "sshpass", "-p", password, "ssh",
+		"-o", "StrictHostKeyChecking=no",
+		"-o", "UserKnownHostsFile=/dev/null",
+		fmt.Sprintf("%s@%s", user, ip),
+		"/usr/bin/log", "stream", "--style", "syslog", "--level=info")
+
+	cmd.Stdout = stdoutFile
+	cmd.Stderr = stderrFile
+
+	if err := cmd.Run(); err != nil && ctx.Err() == nil {
+		d.logger.Error("syslog streaming command failed", "err", err)
+	}
 }
