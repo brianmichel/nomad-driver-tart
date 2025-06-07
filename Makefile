@@ -1,7 +1,7 @@
 GOBINARY=go
 BINARY_NAME=nomad-driver-tart
 
-.PHONY: build
+.PHONY: clean build
 build:
 	@echo "Building Nomad Tart driver plugin..."
 	@$(GOBINARY) build -o $(BINARY_NAME) main.go

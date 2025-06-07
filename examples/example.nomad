@@ -1,4 +1,4 @@
-job "example-tart" {
+job "macos-sequoia-vanilla" {
   datacenters = ["dc1"]
   type        = "service"
 
@@ -11,18 +11,18 @@ job "example-tart" {
     progress_deadline = "60m"
   }
 
-  group "example" {
+  group "vms" {
     count = 1
 
-    task "tart-vm" {
+    task "vm" {
       driver = "tart"
 
       # Setup password with a secure Nomad var
       # Example:
-      #   nomad var put nomad/jobs/example-tart ssh_password="your VM password"
+      #   nomad var put nomad/jobs/macos-sequoia-vanilla ssh_password="your VM password"
       template {
         data        = <<EOH
-SSH_PASSWORD={{ with nomadVar "nomad/jobs/example-tart" }}{{ .ssh_password }}{{ end }}
+SSH_PASSWORD={{ with nomadVar "nomad/jobs/macos-sequoia-vanilla" }}{{ .ssh_password }}{{ end }}
 EOH
         destination = "secrets/file.env"
         env         = true
@@ -30,11 +30,8 @@ EOH
 
       config {
         url          = "ghcr.io/cirruslabs/macos-sequoia-vanilla:latest"
-        name         = "example-vm"
         ssh_user     = "admin"
         ssh_password = "${SSH_PASSWORD}"
-        command      = "/bin/echo"
-        args         = ["Hello from Tart VM!"]
       }
 
       resources {
