@@ -166,6 +166,7 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	handle := drivers.NewTaskHandle(taskHandleVersion)
 	handle.Config = cfg
 
+	allocVMName := d.generateVMName(cfg.AllocID)
 	// Check if the VM already exists before attempting a download
 	vms, err := d.virtualizer.ListVMs(d.ctx)
 	if err != nil {
@@ -174,14 +175,17 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 
 	vmExists := false
 	for _, vm := range vms {
-		if vm.Name == taskConfig.Name {
+		// Tart stores locally downloaded VMs by the URL of the image
+		// see if we have already cloned the image so that we can skip
+		// downloading the image from the registry.
+		if vm.Name == taskConfig.URL {
 			vmExists = true
 			break
 		}
 	}
 
 	if !vmExists {
-		d.logger.Info("VM image not found locally, downloading", "name", taskConfig.Name, "url", taskConfig.URL)
+		d.logger.Info("VM image not found locally, downloading", "url", taskConfig.URL)
 		d.eventer.EmitEvent(&drivers.TaskEvent{
 			TaskID:    cfg.ID,
 			TaskName:  cfg.Name,
@@ -192,20 +196,23 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 				"url": taskConfig.URL,
 			},
 		})
+	}
 
-		if err := d.virtualizer.SetupVM(d.ctx, taskConfig.Name, taskConfig.URL); err != nil {
-			return nil, nil, fmt.Errorf("failed to setup VM: %v", err)
-		}
+	if err := d.virtualizer.SetupVM(d.ctx, allocVMName, taskConfig.URL); err != nil {
+		return nil, nil, fmt.Errorf("failed to setup VM: %v", err)
+	}
 
+	if !vmExists {
 		d.eventer.EmitEvent(&drivers.TaskEvent{
 			TaskID:    cfg.ID,
 			TaskName:  cfg.Name,
 			AllocID:   cfg.AllocID,
 			Timestamp: time.Now(),
 			Message:   "VM image download complete",
+			Annotations: map[string]string{
+				"url": taskConfig.URL,
+			},
 		})
-	} else {
-		d.logger.Info("VM image already present", "name", taskConfig.Name)
 	}
 
 	pluginLogFile := filepath.Join(cfg.TaskDir().Dir, "executor.out")
@@ -222,7 +229,7 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 
 	execCmd := &executor.ExecCommand{
 		Cmd:              "tart",
-		Args:             []string{"run", taskConfig.Name},
+		Args:             []string{"run", allocVMName},
 		Env:              cfg.EnvList(),
 		User:             cfg.User,
 		TaskDir:          cfg.TaskDir().Dir,
@@ -264,7 +271,7 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	}
 	syslogCtx, cancel := context.WithCancel(d.ctx)
 	h.syslogCancel = cancel
-	go d.streamSyslog(syslogCtx, taskConfig.Name, taskConfig.SSHUser, taskConfig.SSHPassword, cfg.StdoutPath, cfg.StderrPath)
+	go d.streamSyslog(syslogCtx, allocVMName, taskConfig.SSHUser, taskConfig.SSHPassword, cfg.StdoutPath, cfg.StderrPath)
 	d.tasks.Set(cfg.ID, h)
 	go h.run()
 
@@ -319,11 +326,17 @@ func (d *Driver) StopTask(taskID string, timeout time.Duration, signal string) e
 		return drivers.ErrTaskNotFound
 	}
 
+	allocVMName := d.generateVMName(handle.taskConfig.AllocID)
+
 	// Attempt to gracefully stop the VM via the virtualizer
 	var taskConfig TaskConfig
 	if err := handle.taskConfig.DecodeDriverConfig(&taskConfig); err == nil {
-		if err := d.virtualizer.StopVM(d.ctx, taskConfig.Name, timeout); err != nil {
+		if err := d.virtualizer.StopVM(d.ctx, allocVMName, timeout); err != nil {
 			d.logger.Warn("failed to stop VM via virtualizer", "error", err)
+		}
+
+		if err := d.virtualizer.DeleteVM(d.ctx, allocVMName); err != nil {
+			d.logger.Warn("failed to delete VM via virtualizer", "error", err)
 		}
 	}
 
@@ -449,4 +462,8 @@ func (d *Driver) streamSyslog(ctx context.Context, vmName, user, password, stdou
 	if err := cmd.Run(); err != nil && ctx.Err() == nil {
 		d.logger.Error("syslog streaming command failed", "err", err)
 	}
+}
+
+func (d *Driver) generateVMName(allocationID string) string {
+	return fmt.Sprintf("nomad-%s", allocationID)
 }
