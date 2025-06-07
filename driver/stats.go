@@ -2,7 +2,10 @@ package driver
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/nomad/drivers/shared/executor"
@@ -117,4 +120,47 @@ func (d *Driver) collectStats(ctx context.Context, h *taskHandle, interval time.
 		case ch <- agg:
 		}
 	}
+}
+
+// relatedPIDs returns the tart process PID and any virtualization service PIDs
+// associated with the given VM name.
+func (d *Driver) relatedPIDs(vmName string, tartPID int) []int {
+	pids := []int{}
+	if tartPID > 0 {
+		pids = append(pids, tartPID)
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return pids
+	}
+
+	diskPath := filepath.Join(home, ".tart", vmName, "disk.img")
+
+	processes, err := process.Processes()
+	if err != nil {
+		return pids
+	}
+
+	for _, p := range processes {
+		exe, err := p.Exe()
+		if err != nil {
+			continue
+		}
+		if !strings.Contains(exe, "Virtualization.VirtualMachine") {
+			continue
+		}
+
+		files, err := p.OpenFiles()
+		if err != nil {
+			continue
+		}
+		for _, f := range files {
+			if f.Path == diskPath {
+				pids = append(pids, int(p.Pid))
+				break
+			}
+		}
+	}
+	return pids
 }
