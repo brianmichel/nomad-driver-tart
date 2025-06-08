@@ -245,3 +245,32 @@ func (c *TartClient) SSH(ctx context.Context, vmName, user, command string) (str
 
 	return stdout.String(), nil
 }
+
+// SetVMResources modifies CPU cores, memory (MB), and disk size (GB) for a VM.
+func (c *TartClient) SetVMResources(ctx context.Context, vmName string, cpu, memoryMB, diskGB int) error {
+	args := []string{"set", vmName}
+	if cpu > 0 {
+		args = append(args, "--cpu", fmt.Sprintf("%d", cpu))
+	}
+	if memoryMB > 0 {
+		args = append(args, "--memory", fmt.Sprintf("%d", memoryMB))
+	}
+	if diskGB > 0 {
+		args = append(args, "--disk-size", fmt.Sprintf("%d", diskGB))
+	}
+
+	if len(args) == 2 {
+		return nil
+	}
+
+	c.logger.Debug("Setting VM resources", "name", vmName, "args", args)
+	cmd := exec.CommandContext(ctx, "tart", args...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to set resources for VM %s: %v (stderr: %s)", vmName, err, stderr.String())
+	}
+	return nil
+}

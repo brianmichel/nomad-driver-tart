@@ -57,4 +57,8 @@ type Virtualizer interface {
 
 	// SSH executes a command on the VM via SSH
 	SSH(ctx context.Context, vmName, user, command string) (string, error)
+
+	// SetVMResources adjusts the CPU cores, memory (in MB), and disk size (in GB)
+	// for the VM. Any value set to zero will be ignored.
+	SetVMResources(ctx context.Context, vmName string, cpu, memoryMB, diskGB int) error
 }

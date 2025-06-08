@@ -13,6 +13,8 @@ This driver allows Nomad to manage the lifecycle of Tart VMs, providing a way to
 - Signal forwarding to tasks
 - Placeholder for resource usage statistics
 - Syslog streaming from VMs via SSH
+- Control VM CPU and memory via Nomad's `resources` block
+- Optional VM disk size configuration
 
 ## Requirements
 
@@ -102,11 +104,14 @@ EOH
         # Whether or not to show the built-in Tart UI for the VM
         # Defaults to false
         show_ui      = true
+        # Optional resource configuration for the VM
+        # disk_size is the desired disk size in gigabytes
+        disk_size  = 60
       }
 
       resources {
-        cpu    = 500
-        memory = 256
+        cpu    = 500   # Number of virtual CPU shares (1 core = 1000)
+        memory = 256  # Memory in MB assigned to the VM
       }
 
       logs {
