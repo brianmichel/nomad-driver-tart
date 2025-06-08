@@ -38,8 +38,8 @@ EOH
       }
 
       resources {
-        cpu    = 500
-        memory = 256
+        cores = 8
+        memory = 10240 # 10GB
       }
 
       logs {

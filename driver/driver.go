@@ -3,10 +3,10 @@ package driver
 import (
 	"context"
 	"fmt"
-	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/brianmichel/nomad-driver-tart/virtualizer"
@@ -199,18 +199,19 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		})
 	}
 
+	d.logger.Info("resources block looks like this", "resources", cfg.Resources)
+
 	if err := d.virtualizer.SetupVM(d.ctx, allocVMName, taskConfig.URL); err != nil {
 		return nil, nil, fmt.Errorf("failed to setup VM: %v", err)
 	}
 
 	// Configure VM resources before starting it using the Nomad resources block
-	var cpuCores, memoryMB int
-	if cfg.Resources != nil && cfg.Resources.NomadResources != nil {
-		cpuShares := cfg.Resources.NomadResources.Cpu.CpuShares
-		if cpuShares > 0 {
-			cpuCores = int(math.Ceil(float64(cpuShares) / 1000.0))
-		}
-		memoryMB = int(cfg.Resources.NomadResources.Memory.MemoryMB)
+	var cpuCores int = 4    // Default to 4 cores
+	var memoryMB int = 4096 // Default to 4GB of memory
+	if cfg.Resources != nil && cfg.Resources.LinuxResources != nil {
+		// TODO: See if there's a better way of getting the number of cores
+		cpuCores = len(strings.Split(cfg.Resources.LinuxResources.CpusetCpus, ","))
+		memoryMB = int(cfg.Resources.LinuxResources.MemoryLimitBytes / 1024 / 1024)
 	}
 
 	diskGB := taskConfig.DiskSize
