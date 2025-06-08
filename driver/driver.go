@@ -3,6 +3,7 @@ package driver
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -42,7 +43,7 @@ var (
 	// capabilities is returned by the Capabilities RPC and indicates what
 	// optional features this driver supports
 	capabilities = &drivers.Capabilities{
-		SendSignals: true,
+		SendSignals: false,
 		Exec:        true,
 		FSIsolation: drivers.FSIsolationImage,
 	}
@@ -432,19 +433,48 @@ func (d *Driver) SignalTask(taskID string, signal string) error {
 	}
 
 	// TODO: Implement actual VM signaling logic
-	d.logger.Info("signaling tart task", "task_id", taskID, "signal", signal)
+	d.logger.Info("signaling tart task", "task_ id", taskID, "signal", signal)
 	return nil
 }
 
 // ExecTask returns the result of executing the given command inside a task.
 func (d *Driver) ExecTask(taskID string, cmd []string, timeout time.Duration) (*drivers.ExecTaskResult, error) {
-	_, ok := d.tasks.Get(taskID)
+	d.logger.Info("executing command inside task", "task_id", taskID, "cmd", cmd)
+	handle, ok := d.tasks.Get(taskID)
 	if !ok {
 		return nil, drivers.ErrTaskNotFound
 	}
 
-	// Exec is not supported
-	return nil, fmt.Errorf("exec is not supported by the tart driver")
+	var taskConfig TaskConfig
+	if err := handle.taskConfig.DecodeDriverConfig(&taskConfig); err != nil {
+		return nil, fmt.Errorf("failed to decode driver config: %v", err)
+	}
+
+	allocVMName := d.generateVMName(handle.taskConfig.AllocID)
+	output, stderr, err := d.virtualizer.SSH(d.ctx, allocVMName, taskConfig.SSHUser, taskConfig.SSHPassword, strings.Join(cmd, " "))
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute SSH command on VM %s: %v (stderr: %s)",
+			allocVMName, err, stderr)
+	}
+
+	return &drivers.ExecTaskResult{
+		Stdout: []byte(output),
+		Stderr: []byte(stderr),
+		ExitResult: &drivers.ExitResult{
+			ExitCode: 0,
+		},
+	}, nil
+}
+
+func (d *Driver) Exec(ctx context.Context,
+	taskID string,
+	command []string,
+	tty bool,
+	stdin io.Reader,
+	stdout, stderr io.Writer,
+) (*drivers.ExecResult, error) {
+	d.logger.Info("executing command inside task", "task_id", taskID, "cmd", command)
+	return nil, fmt.Errorf("not implemented, but at least you got here")
 }
 
 // streamSyslog streams a VM's syslog output to the given stdout/stderr files.

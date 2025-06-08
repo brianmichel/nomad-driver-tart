@@ -8,9 +8,9 @@ client {
   enabled = true
   
   # Enable the tart driver
-  options {
-    "driver.allowlist" = "tart"
-  }
+  # options {
+  #   "driver.allowlist" = "tart"
+  # }
 }
 
 server {

@@ -223,7 +223,12 @@ func (c *TartClient) IPAddress(ctx context.Context, vmName string) (string, erro
 // This method is now replaced by IsInstalled to match the Virtualizer interface
 
 // SSH executes an SSH command on the VM
-func (c *TartClient) SSH(ctx context.Context, vmName, user, command string) (string, error) {
+func (c *TartClient) SSH(ctx context.Context, vmName, user, password, command string) (string, string, error) {
+	ip, err := c.IPAddress(ctx, vmName)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get IP address for VM %s: %v", vmName, err)
+	}
+
 	args := []string{"ssh", vmName}
 	if user != "" {
 		args = append(args, "--user", user)
@@ -232,18 +237,21 @@ func (c *TartClient) SSH(ctx context.Context, vmName, user, command string) (str
 		args = append(args, command)
 	}
 
-	cmd := exec.CommandContext(ctx, "tart", args...)
+	cmd := exec.CommandContext(ctx, "sshpass", "-p", password, "ssh",
+		"-o", "StrictHostKeyChecking=no",
+		"-o", "UserKnownHostsFile=/dev/null",
+		fmt.Sprintf("%s@%s", user, ip), strings.Join(args, " "))
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("failed to execute SSH command on VM %s: %v (stderr: %s)",
+		return "", "", fmt.Errorf("failed to execute SSH command on VM %s: %v (stderr: %s)",
 			vmName, err, stderr.String())
 	}
 
-	return stdout.String(), nil
+	return stdout.String(), stderr.String(), nil
 }
 
 // SetVMResources modifies CPU cores, memory (MB), and disk size (GB) for a VM.
