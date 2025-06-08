@@ -3,7 +3,6 @@ package driver
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +15,7 @@ import (
 	"github.com/hashicorp/nomad/drivers/shared/executor"
 	"github.com/hashicorp/nomad/plugins/base"
 	"github.com/hashicorp/nomad/plugins/drivers"
+	"github.com/hashicorp/nomad/plugins/drivers/fsisolation"
 	"github.com/hashicorp/nomad/plugins/shared/hclspec"
 )
 
@@ -45,7 +45,7 @@ var (
 	capabilities = &drivers.Capabilities{
 		SendSignals: false,
 		Exec:        true,
-		FSIsolation: drivers.FSIsolationImage,
+		FSIsolation: fsisolation.Image,
 	}
 )
 
@@ -142,6 +142,8 @@ func (d *Driver) TaskConfigSchema() (*hclspec.Spec, error) {
 
 // Capabilities returns the features supported by the driver.
 func (d *Driver) Capabilities() (*drivers.Capabilities, error) {
+	d.logger.Info("CAPABILITIES DEBUG", "exec", capabilities.Exec, "send_signals", capabilities.SendSignals)
+
 	return capabilities, nil
 }
 
@@ -464,17 +466,6 @@ func (d *Driver) ExecTask(taskID string, cmd []string, timeout time.Duration) (*
 			ExitCode: 0,
 		},
 	}, nil
-}
-
-func (d *Driver) Exec(ctx context.Context,
-	taskID string,
-	command []string,
-	tty bool,
-	stdin io.Reader,
-	stdout, stderr io.Writer,
-) (*drivers.ExecResult, error) {
-	d.logger.Info("executing command inside task", "task_id", taskID, "cmd", command)
-	return nil, fmt.Errorf("not implemented, but at least you got here")
 }
 
 // streamSyslog streams a VM's syslog output to the given stdout/stderr files.

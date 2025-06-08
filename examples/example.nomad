@@ -12,7 +12,7 @@ job "macos-sequoia-vanilla" {
   }
 
   group "vms" {
-    count = 1
+    count = 2
 
     task "vm" {
       driver = "tart"
@@ -38,8 +38,8 @@ EOH
       }
 
       resources {
-        cores = 8
-        memory = 10240 # 10GB
+        cores = 4
+        memory = 8192 # 8GB
       }
 
       logs {
