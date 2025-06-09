@@ -317,16 +317,13 @@ func (d *Driver) RecoverTask(h *drivers.TaskHandle) error {
 		return fmt.Errorf("failed to decode task state from handle: %v", err)
 	}
 
-	// TODO: Implement task recovery logic
-	// For now, just create a basic task handle
-	d.tasks.Set(h.Config.ID, &taskHandle{
-		taskConfig: taskState.TaskConfig,
-		state:      drivers.TaskStateRunning,
-		startedAt:  taskState.StartedAt,
-		logger:     d.logger,
-	})
-
+	// Start the task with the previous configuration.
 	d.logger.Info("recovered tart task", "task_id", h.Config.ID)
+	_, _, err := d.StartTask(taskState.TaskConfig)
+	if err != nil {
+		return fmt.Errorf("failed to start task: %v", err)
+	}
+
 	return nil
 }
 
