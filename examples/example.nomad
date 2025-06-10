@@ -3,7 +3,8 @@ job "macos-sequoia-vanilla" {
   type        = "service"
 
   update {
-    max_parallel = 1
+    // Don't leave anything running in paralle when we're rescheduling.
+    max_parallel = 0
     // Downloading a VM image can take a while as they are
     // tens of GBs in size. Give our jobs enough grace to
     // get setup properly.
@@ -13,6 +14,14 @@ job "macos-sequoia-vanilla" {
 
   group "vms" {
     count = 1
+
+    // Virtualization.framework mandates a maximum of 2 VMs per host.
+    // We can use this constraint to avoid scheduling errors due to
+    // attempted VM oversubscription on a node.
+    constraint {
+      attribute = attr.driver.tart.available_slots
+      value     = "true"
+    }
 
     task "vm" {
       driver = "tart"
@@ -34,11 +43,11 @@ EOH
         ssh_password = "${SSH_PASSWORD}"
         # Whether or not to show the built-in Tart UI for the VM
         # Defaults to false
-        show_ui      = true
+        show_ui = true
       }
 
       resources {
-        cores = 8
+        cores  = 8
         memory = 10240 # 10GB
       }
 
