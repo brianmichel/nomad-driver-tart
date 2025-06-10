@@ -42,15 +42,9 @@ jobs:
       - uses: actions/setup-go@v4
         with:
           go-version-file: go.mod
-      - name: Build darwin arm64 binary
-        env:
-          GOOS: darwin
-          GOARCH: arm64
-        run: go build -o nomad-driver-tart-${GOOS}-${GOARCH} main.go
-      - uses: ncipollo/release-action@v1
+      - uses: goreleaser/goreleaser-action@v5
         with:
-          artifacts: "nomad-driver-tart-darwin-arm64"
-          tag: ${{ github.ref_name }}
-          name: Release ${{ github.ref_name }}
-          draft: false
-          prerelease: false
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
