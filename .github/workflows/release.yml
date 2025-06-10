@@ -23,7 +23,7 @@ jobs:
           go-version-file: go.mod
       - name: Run GoReleaser (full release)
         if: github.event_name == 'push'
-        uses: goreleaser/goreleaser-action@v5
+        uses: goreleaser/goreleaser-action@v6.3.0
         with:
           version: latest
           args: release --clean
@@ -31,7 +31,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Run GoReleaser (snapshot)
         if: github.event_name == 'workflow_dispatch'
-        uses: goreleaser/goreleaser-action@v5
+        uses: goreleaser/goreleaser-action@v6.3.0
         with:
           version: latest
           args: release --snapshot --clean
