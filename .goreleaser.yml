@@ -1,3 +1,4 @@
+version: 2
 project_name: nomad-driver-tart
 builds:
   - id: nomad-driver-tart
