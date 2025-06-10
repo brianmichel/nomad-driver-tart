@@ -169,7 +169,7 @@ This driver is currently in development and provides basic functionality. Future
 
 ### Continuous Integration
 
-A GitHub Actions workflow automatically formats, vets, and builds the driver for darwin/arm64 on every pull request and push to `main`. Tagging a commit with `v*` also uploads the built binary as a release artifact.
+A GitHub Actions workflow automatically formats, vets, and builds the driver for darwin/arm64 on every pull request and push to `main`. Releases are handled by a separate workflow that runs [GoReleaser](https://goreleaser.com/) whenever a tag starting with `v` is pushed. The release workflow can also be manually triggered to produce a snapshot from any commit.
 
 
 ## License

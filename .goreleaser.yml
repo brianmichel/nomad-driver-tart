@@ -1,0 +1,24 @@
+version: 2
+project_name: nomad-driver-tart
+builds:
+  - id: nomad-driver-tart
+    main: ./main.go
+    goos:
+      - darwin
+    goarch:
+      - arm64
+    env:
+      - CGO_ENABLED=0
+    ldflags: -s -w
+archives:
+  - id: nomad-driver-tart
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+release:
+  github:
+    owner: brianmichel
+    name: nomad-driver-tart
