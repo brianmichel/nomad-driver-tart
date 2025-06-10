@@ -1,10 +1,18 @@
 # Nomad Driver for Tart VMs
 
+<p align="center">
+  <img src="img/nomad-driver-tart-logo.png" width="150" />
+</p>
+
 A custom task driver for HashiCorp Nomad that enables orchestration and management of [Tart](https://github.com/cirruslabs/tart) virtual machines on macOS.
 
 ## Overview
 
 This driver allows Nomad to manage the lifecycle of Tart VMs, providing a way to run macOS virtual machines as Nomad tasks. It integrates with Nomad's ecosystem, enabling users to deploy and manage Tart VMs through Nomad's job specification.
+
+## Video
+
+[![Nomad Driver for Tart VMs](img/nomad-driver-tart-video-thumbnail.png)](https://share.cleanshot.com/S5VmP3fk)
 
 ## Features
 
