@@ -1,5 +1,5 @@
 GOBINARY=go
-BINARY_NAME=nomad-driver-tart
+BINARY_NAME=dist/nomad-driver-tart
 
 .PHONY: clean build
 build:
