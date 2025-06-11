@@ -2,6 +2,7 @@ package driver
 
 import (
 	"context"
+	"io"
 	"time"
 
 	"github.com/hashicorp/nomad/plugins/drivers"
@@ -30,6 +31,15 @@ type VMConfig struct {
 	TaskConfig TaskConfig
 	// The configuration that is shared with Nomad
 	NomadConfig *drivers.TaskConfig
+}
+
+type ExecOptions struct {
+	Command  []string
+	Tty      bool
+	Stdin    io.ReadCloser
+	Stdout   io.WriteCloser
+	Stderr   io.WriteCloser
+	ResizeCh <-chan drivers.TerminalSize
 }
 
 // VirtualizationClient defines the interface for interacting with virtual machines
@@ -63,5 +73,5 @@ type VirtualizationClient interface {
 	// Exec executes a command on the VM, similar to SSH.
 	// 'user' specifies the user to run the command as.
 	// Returns the command output or an error.
-	Exec(ctx context.Context, vmName, user, command string) (string, error)
+	Exec(ctx context.Context, config VMConfig, opts ExecOptions) (int, error)
 }

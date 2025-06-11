@@ -5,10 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
 
+	"github.com/creack/pty"
 	"github.com/hashicorp/go-hclog"
 )
 
@@ -72,16 +75,16 @@ func (c *TartClient) Setup(ctx context.Context, config VMConfig) (string, error)
 
 	diskGB := config.TaskConfig.DiskSize
 
-	if err := c.SetVMResources(ctx, vmName, cpuCores, memoryMB, diskGB); err != nil {
-		return "", fmt.Errorf("failed to set VM resources: %v", err)
-	}
-
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("failed to create VM %s from URL %s: %v (stderr: %s)",
 			vmName, url, err, stderr.String())
+	}
+
+	if err := c.SetVMResources(ctx, vmName, cpuCores, memoryMB, diskGB); err != nil {
+		return "", fmt.Errorf("failed to set VM resources: %v", err)
 	}
 
 	return vmName, nil
@@ -172,18 +175,6 @@ func (c *TartClient) Status(ctx context.Context, vmName string) (VMState, error)
 	return "", fmt.Errorf("VM %s not found", vmName)
 }
 
-// convertTartStatus converts tart status strings to our VMState type
-func convertTartStatus(tartStatus string) VMState {
-	switch strings.ToLower(tartStatus) {
-	case "running":
-		return VMStateRunning
-	case "paused":
-		return VMStatePaused
-	default:
-		return VMStateStopped
-	}
-}
-
 // CloneVM clones a Tart VM
 func (c *TartClient) CloneVM(ctx context.Context, sourceVM, targetVM string) error {
 	c.logger.Debug("Cloning Tart VM", "source", sourceVM, "target", targetVM)
@@ -233,27 +224,73 @@ func (c *TartClient) IPAddress(ctx context.Context, vmName string) (string, erro
 }
 
 // Exec executes an SSH command on the VM
-func (c *TartClient) Exec(ctx context.Context, vmName, user, command string) (string, error) {
-	args := []string{"ssh", vmName}
-	if user != "" {
-		args = append(args, "--user", user)
-	}
-	if command != "" {
-		args = append(args, command)
+func (c *TartClient) Exec(ctx context.Context, config VMConfig, opts ExecOptions) (int, error) {
+	if len(opts.Command) == 0 {
+		return -1, fmt.Errorf("command is required but was empty")
 	}
 
-	cmd := exec.CommandContext(ctx, "tart", args...)
+	vmName := c.generateVMName(config.NomadConfig.AllocID)
 
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("failed to execute SSH command on VM %s: %v (stderr: %s)",
-			vmName, err, stderr.String())
+	ip, err := c.IPAddress(ctx, vmName)
+	if err != nil || ip == "" {
+		return -1, fmt.Errorf("failed to get VM IP: %v", err)
 	}
 
-	return stdout.String(), nil
+	sshArgs := []string{"ssh", "-q", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null"}
+	if opts.Tty {
+		sshArgs = append(sshArgs, "-tt")
+	} else {
+		sshArgs = append(sshArgs, "-T")
+	}
+	sshArgs = append(sshArgs, fmt.Sprintf("%s@%s", config.TaskConfig.SSHUser, ip))
+	sshArgs = append(sshArgs, opts.Command...)
+
+	sshPassArgs := []string{"-p", config.TaskConfig.SSHPassword, "ssh"}
+	sshPassArgs = append(sshPassArgs, sshArgs...)
+
+	cmd := exec.CommandContext(ctx, "sshpass", sshPassArgs...)
+	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+
+	var sshErr error
+	if opts.Tty {
+		ptmx, err := pty.Start(cmd)
+		if err != nil {
+			return -1, fmt.Errorf("failed to start ssh command: %v", err)
+		}
+		defer ptmx.Close()
+
+		go func() { io.Copy(ptmx, opts.Stdin) }()
+		go func() { io.Copy(opts.Stdout, ptmx) }()
+
+		go func() {
+			for sz := range opts.ResizeCh {
+				_ = pty.Setsize(ptmx, &pty.Winsize{Rows: uint16(sz.Height), Cols: uint16(sz.Width)})
+			}
+		}()
+
+		sshErr = cmd.Wait()
+	} else {
+		cmd.Stdin = opts.Stdin
+		cmd.Stdout = opts.Stdout
+		cmd.Stderr = opts.Stderr
+
+		sshErr = cmd.Run()
+	}
+
+	exitCode := 0
+	if sshErr != nil {
+		if ee, ok := sshErr.(*exec.ExitError); ok {
+			exitCode = ee.ExitCode()
+		} else if ctx.Err() != nil {
+			return -1, ctx.Err()
+		} else {
+			return -1, sshErr
+		}
+	} else if cmd.ProcessState != nil {
+		exitCode = cmd.ProcessState.ExitCode()
+	}
+
+	return exitCode, nil
 }
 
 // SetVMResources modifies CPU cores, memory (MB), and disk size (GB) for a VM.
@@ -287,4 +324,16 @@ func (c *TartClient) SetVMResources(ctx context.Context, vmName string, cpu, mem
 
 func (c *TartClient) generateVMName(allocationID string) string {
 	return fmt.Sprintf("nomad-%s", allocationID)
+}
+
+// convertTartStatus converts tart status strings to our VMState type
+func convertTartStatus(tartStatus string) VMState {
+	switch strings.ToLower(tartStatus) {
+	case "running":
+		return VMStateRunning
+	case "paused":
+		return VMStatePaused
+	default:
+		return VMStateStopped
+	}
 }
