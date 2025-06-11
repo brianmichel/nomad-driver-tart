@@ -4,8 +4,6 @@ on:
   push:
     tags:
       - 'v*'
-    branches:
-      - main
   workflow_dispatch:
     inputs:
       ref:
@@ -26,7 +24,7 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Run GoReleaser (full release)
-        if: github.event_name == 'push'
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: goreleaser/goreleaser-action@v6.3.0
         with:
           version: latest
