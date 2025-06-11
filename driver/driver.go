@@ -7,10 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"time"
 
-	"github.com/brianmichel/nomad-driver-tart/virtualizer"
 	"github.com/creack/pty"
 	"github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/nomad/drivers/shared/eventer"
@@ -76,8 +74,8 @@ type Driver struct {
 	// logger will log to the Nomad agent
 	logger hclog.Logger
 
-	// virtualizer is the interface for interacting with virtual machines
-	virtualizer virtualizer.Virtualizer
+	// client is the interface for interacting with virtual machines
+	client VirtualizationClient
 }
 
 // TaskState is the state which is encoded in the handle returned in
@@ -96,7 +94,7 @@ func NewTartDriver(logger hclog.Logger) drivers.DriverPlugin {
 	logger = logger.Named(pluginName)
 
 	// Create a TartClient as our default virtualizer implementation
-	virtualizer := virtualizer.NewTartClient(logger)
+	client := NewTartClient(logger)
 
 	return &Driver{
 		eventer:        eventer.NewEventer(ctx, logger),
@@ -105,7 +103,7 @@ func NewTartDriver(logger hclog.Logger) drivers.DriverPlugin {
 		ctx:            ctx,
 		signalShutdown: cancel,
 		logger:         logger,
-		virtualizer:    virtualizer,
+		client:         client,
 	}
 }
 
@@ -171,7 +169,7 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 
 	allocVMName := d.generateVMName(cfg.AllocID)
 	// Check if the VM already exists before attempting a download
-	vms, err := d.virtualizer.ListVMs(d.ctx)
+	vms, err := d.client.List(d.ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to list VMs: %v", err)
 	}
@@ -203,23 +201,13 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 
 	d.logger.Info("resources block looks like this", "resources", cfg.Resources)
 
-	if err := d.virtualizer.SetupVM(d.ctx, allocVMName, taskConfig.URL); err != nil {
+	vmConfig := VMConfig{
+		TaskConfig:  taskConfig,
+		NomadConfig: cfg,
+	}
+
+	if _, err := d.client.Setup(d.ctx, vmConfig); err != nil {
 		return nil, nil, fmt.Errorf("failed to setup VM: %v", err)
-	}
-
-	// Configure VM resources before starting it using the Nomad resources block
-	var cpuCores int = 4    // Default to 4 cores
-	var memoryMB int = 4096 // Default to 4GB of memory
-	if cfg.Resources != nil && cfg.Resources.LinuxResources != nil {
-		// TODO: See if there's a better way of getting the number of cores
-		cpuCores = len(strings.Split(cfg.Resources.LinuxResources.CpusetCpus, ","))
-		memoryMB = int(cfg.Resources.LinuxResources.MemoryLimitBytes / 1024 / 1024)
-	}
-
-	diskGB := taskConfig.DiskSize
-
-	if err := d.virtualizer.SetVMResources(d.ctx, allocVMName, cpuCores, memoryMB, diskGB); err != nil {
-		return nil, nil, fmt.Errorf("failed to set VM resources: %v", err)
 	}
 
 	if !vmExists {
@@ -353,11 +341,11 @@ func (d *Driver) StopTask(taskID string, timeout time.Duration, signal string) e
 	// Attempt to gracefully stop the VM via the virtualizer
 	var taskConfig TaskConfig
 	if err := handle.taskConfig.DecodeDriverConfig(&taskConfig); err == nil {
-		if err := d.virtualizer.StopVM(d.ctx, allocVMName, timeout); err != nil {
+		if err := d.client.Stop(d.ctx, allocVMName, timeout); err != nil {
 			d.logger.Warn("failed to stop VM via virtualizer", "error", err)
 		}
 
-		if err := d.virtualizer.DeleteVM(d.ctx, allocVMName); err != nil {
+		if err := d.client.Delete(d.ctx, allocVMName); err != nil {
 			d.logger.Warn("failed to delete VM via virtualizer", "error", err)
 		}
 	}
@@ -470,7 +458,7 @@ func (d *Driver) ExecTaskStreaming(ctx context.Context, taskID string, opts *dri
 
 	vmName := d.generateVMName(handle.taskConfig.AllocID)
 
-	ip, err := d.virtualizer.IPAddress(ctx, vmName)
+	ip, err := d.client.IPAddress(ctx, vmName)
 	if err != nil || ip == "" {
 		return nil, fmt.Errorf("failed to get VM IP: %v", err)
 	}
@@ -533,10 +521,10 @@ func (d *Driver) ExecTaskStreaming(ctx context.Context, taskID string, opts *dri
 
 // streamSyslog streams a VM's syslog output to the given stdout/stderr files.
 func (d *Driver) streamSyslog(ctx context.Context, vmName, user, password, stdoutPath, stderrPath string) {
-	ip, err := d.virtualizer.IPAddress(ctx, vmName)
+	ip, err := d.client.IPAddress(ctx, vmName)
 	for i := 0; i < 5 && (err != nil || ip == ""); i++ {
 		time.Sleep(2 * time.Second)
-		ip, err = d.virtualizer.IPAddress(ctx, vmName)
+		ip, err = d.client.IPAddress(ctx, vmName)
 	}
 	if err != nil || ip == "" {
 		d.logger.Error("failed to get VM IP for syslog streaming", "vm", vmName, "err", err)
