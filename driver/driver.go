@@ -475,7 +475,7 @@ func (d *Driver) ExecTaskStreaming(ctx context.Context, taskID string, opts *dri
 		return nil, fmt.Errorf("failed to get VM IP: %v", err)
 	}
 
-	sshArgs := []string{"ssh", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null"}
+	sshArgs := []string{"ssh", "-q", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null"}
 	if opts.Tty {
 		sshArgs = append(sshArgs, "-tt")
 	} else {
