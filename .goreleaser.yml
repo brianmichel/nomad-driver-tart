@@ -10,6 +10,7 @@ builds:
     env:
       - CGO_ENABLED=0
     ldflags: -s -w
+
 archives:
   - id: nomad-driver-tart
     formats:
@@ -22,12 +23,6 @@ release:
   github:
     owner: brianmichel
     name: nomad-driver-tart
-
-nightly:
-  version_template: "{{ incpatch .Version }}-devel"
-  tag_name: devel
-  publish_release: true
-  keep_single_release: true
 
 snapshot:
   version_template: "{{ .ProjectName }}-SNAPSHOT-{{ .ShortCommit }}"
