@@ -236,7 +236,7 @@ func (c *TartClient) Exec(ctx context.Context, config VMConfig, opts ExecOptions
 		return -1, fmt.Errorf("failed to get VM IP: %v", err)
 	}
 
-	sshArgs := []string{"ssh", "-q", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null"}
+	sshArgs := []string{"-q", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null"}
 	if opts.Tty {
 		sshArgs = append(sshArgs, "-tt")
 	} else {
