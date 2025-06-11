@@ -485,6 +485,7 @@ func (d *Driver) ExecTaskStreaming(ctx context.Context, taskID string, opts *dri
 	sshArgs = append(sshArgs, opts.Command...)
 
 	cmd := exec.CommandContext(ctx, "sshpass", append([]string{"-p", taskCfg.SSHPassword}, sshArgs...)...)
+	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
 
 	if opts.Tty {
 		ptmx, err := pty.Start(cmd)
