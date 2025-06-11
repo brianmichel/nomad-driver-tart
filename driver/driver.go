@@ -3,6 +3,7 @@ package driver
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/brianmichel/nomad-driver-tart/virtualizer"
+	"github.com/creack/pty"
 	"github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/nomad/drivers/shared/eventer"
 	"github.com/hashicorp/nomad/drivers/shared/executor"
@@ -442,6 +444,91 @@ func (d *Driver) ExecTask(taskID string, cmd []string, timeout time.Duration) (*
 
 	// Exec is not supported
 	return nil, fmt.Errorf("exec is not supported by the tart driver")
+}
+
+// ExecTaskStreaming executes a command inside the VM backing the allocation and
+// streams the input and output over the provided ExecOptions. The VM is
+// contacted over SSH and the session will remain active for the lifetime of the
+// context.
+func (d *Driver) ExecTaskStreaming(ctx context.Context, taskID string, opts *drivers.ExecOptions) (*drivers.ExitResult, error) {
+	defer opts.Stdout.Close()
+	defer opts.Stderr.Close()
+
+	handle, ok := d.tasks.Get(taskID)
+	if !ok {
+		return nil, drivers.ErrTaskNotFound
+	}
+
+	if len(opts.Command) == 0 {
+		return nil, fmt.Errorf("command is required but was empty")
+	}
+
+	var taskCfg TaskConfig
+	if err := handle.taskConfig.DecodeDriverConfig(&taskCfg); err != nil {
+		return nil, fmt.Errorf("failed to decode driver config: %v", err)
+	}
+
+	vmName := d.generateVMName(handle.taskConfig.AllocID)
+
+	ip, err := d.virtualizer.IPAddress(ctx, vmName)
+	if err != nil || ip == "" {
+		return nil, fmt.Errorf("failed to get VM IP: %v", err)
+	}
+
+	sshArgs := []string{"ssh", "-q", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null"}
+	if opts.Tty {
+		sshArgs = append(sshArgs, "-tt")
+	} else {
+		sshArgs = append(sshArgs, "-T")
+	}
+	sshArgs = append(sshArgs, fmt.Sprintf("%s@%s", taskCfg.SSHUser, ip))
+	sshArgs = append(sshArgs, opts.Command...)
+
+	cmd := exec.CommandContext(ctx, "sshpass", append([]string{"-p", taskCfg.SSHPassword}, sshArgs...)...)
+	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+
+	if opts.Tty {
+		ptmx, err := pty.Start(cmd)
+		if err != nil {
+			return nil, fmt.Errorf("failed to start ssh command: %v", err)
+		}
+		defer ptmx.Close()
+
+		go func() { io.Copy(ptmx, opts.Stdin) }()
+		go func() { io.Copy(opts.Stdout, ptmx) }()
+
+		go func() {
+			for sz := range opts.ResizeCh {
+				_ = pty.Setsize(ptmx, &pty.Winsize{Rows: uint16(sz.Height), Cols: uint16(sz.Width)})
+			}
+		}()
+
+		err = cmd.Wait()
+	} else {
+		cmd.Stdin = opts.Stdin
+		cmd.Stdout = opts.Stdout
+		cmd.Stderr = opts.Stderr
+
+		if err := cmd.Start(); err != nil {
+			return nil, fmt.Errorf("failed to start ssh command: %v", err)
+		}
+		err = cmd.Wait()
+	}
+
+	exitCode := 0
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			exitCode = ee.ExitCode()
+		} else if ctx.Err() != nil {
+			return nil, ctx.Err()
+		} else {
+			return nil, err
+		}
+	} else if cmd.ProcessState != nil {
+		exitCode = cmd.ProcessState.ExitCode()
+	}
+
+	return &drivers.ExitResult{ExitCode: exitCode}, nil
 }
 
 // streamSyslog streams a VM's syslog output to the given stdout/stderr files.
