@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/brianmichel/nomad-driver-tart/virtualizer"
 	"github.com/hashicorp/nomad/plugins/drivers"
 	"github.com/hashicorp/nomad/plugins/shared/structs"
 )
@@ -66,22 +65,18 @@ func (d *Driver) buildFingerprint() *drivers.Fingerprint {
 	fingerprintCtx, cancel := context.WithTimeout(d.ctx, 5*time.Second)
 	defer cancel()
 
-	if err := d.virtualizer.IsInstalled(fingerprintCtx); err != nil {
+	if version, err := d.client.Available(fingerprintCtx); err != nil {
 		d.logger.Warn("failed to find virtualization software", "error", err)
 		fp.Health = drivers.HealthStateUndetected
 		fp.HealthDescription = "virtualization software not found"
 		fp.Attributes[availableSlotsKey] = structs.NewIntAttribute(0, "virtualization software not found")
 		return fp
-	}
-
-	// Get the Tart version and add it as an attribute
-	version, err := d.virtualizer.GetVersion(fingerprintCtx)
-	if err == nil && version != "" {
+	} else {
 		fp.Attributes[versionKey] = structs.NewStringAttribute(version)
 	}
 
 	// Try to list VMs to verify virtualization software is working properly and calculate available slots
-	vms, err := d.virtualizer.ListVMs(fingerprintCtx)
+	vms, err := d.client.List(fingerprintCtx)
 	if err != nil {
 		d.logger.Warn("failed to list VMs", "error", err)
 		fp.Health = drivers.HealthStateUnhealthy
@@ -93,7 +88,7 @@ func (d *Driver) buildFingerprint() *drivers.Fingerprint {
 	// Calculate available slots by counting only running VMs
 	var runningVMsCount int
 	for _, vm := range vms {
-		if vm.Status == virtualizer.VMStateRunning {
+		if vm.Status == VMStateRunning {
 			runningVMsCount++
 		}
 	}

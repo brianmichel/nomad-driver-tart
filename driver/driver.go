@@ -3,15 +3,10 @@ package driver
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"time"
 
-	"github.com/brianmichel/nomad-driver-tart/virtualizer"
-	"github.com/creack/pty"
 	"github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/nomad/drivers/shared/eventer"
 	"github.com/hashicorp/nomad/drivers/shared/executor"
@@ -76,8 +71,8 @@ type Driver struct {
 	// logger will log to the Nomad agent
 	logger hclog.Logger
 
-	// virtualizer is the interface for interacting with virtual machines
-	virtualizer virtualizer.Virtualizer
+	// client is the interface for interacting with virtual machines
+	client VirtualizationClient
 }
 
 // TaskState is the state which is encoded in the handle returned in
@@ -96,7 +91,7 @@ func NewTartDriver(logger hclog.Logger) drivers.DriverPlugin {
 	logger = logger.Named(pluginName)
 
 	// Create a TartClient as our default virtualizer implementation
-	virtualizer := virtualizer.NewTartClient(logger)
+	client := NewTartClient(logger)
 
 	return &Driver{
 		eventer:        eventer.NewEventer(ctx, logger),
@@ -105,7 +100,7 @@ func NewTartDriver(logger hclog.Logger) drivers.DriverPlugin {
 		ctx:            ctx,
 		signalShutdown: cancel,
 		logger:         logger,
-		virtualizer:    virtualizer,
+		client:         client,
 	}
 }
 
@@ -171,7 +166,7 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 
 	allocVMName := d.generateVMName(cfg.AllocID)
 	// Check if the VM already exists before attempting a download
-	vms, err := d.virtualizer.ListVMs(d.ctx)
+	vms, err := d.client.List(d.ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to list VMs: %v", err)
 	}
@@ -203,23 +198,13 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 
 	d.logger.Info("resources block looks like this", "resources", cfg.Resources)
 
-	if err := d.virtualizer.SetupVM(d.ctx, allocVMName, taskConfig.URL); err != nil {
+	vmConfig := VMConfig{
+		TaskConfig:  taskConfig,
+		NomadConfig: cfg,
+	}
+
+	if _, err := d.client.Setup(d.ctx, vmConfig); err != nil {
 		return nil, nil, fmt.Errorf("failed to setup VM: %v", err)
-	}
-
-	// Configure VM resources before starting it using the Nomad resources block
-	var cpuCores int = 4    // Default to 4 cores
-	var memoryMB int = 4096 // Default to 4GB of memory
-	if cfg.Resources != nil && cfg.Resources.LinuxResources != nil {
-		// TODO: See if there's a better way of getting the number of cores
-		cpuCores = len(strings.Split(cfg.Resources.LinuxResources.CpusetCpus, ","))
-		memoryMB = int(cfg.Resources.LinuxResources.MemoryLimitBytes / 1024 / 1024)
-	}
-
-	diskGB := taskConfig.DiskSize
-
-	if err := d.virtualizer.SetVMResources(d.ctx, allocVMName, cpuCores, memoryMB, diskGB); err != nil {
-		return nil, nil, fmt.Errorf("failed to set VM resources: %v", err)
 	}
 
 	if !vmExists {
@@ -294,9 +279,27 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		logger:       d.logger,
 		doneCh:       make(chan struct{}),
 	}
+
+	stdoutFile, err := os.OpenFile(cfg.StdoutPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to open stdout file: %v", err)
+	}
+	defer stdoutFile.Close()
+
+	stderrFile, err := os.OpenFile(cfg.StderrPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to open stderr file: %v", err)
+	}
+	defer stderrFile.Close()
+
 	syslogCtx, cancel := context.WithCancel(d.ctx)
 	h.syslogCancel = cancel
-	go d.streamSyslog(syslogCtx, allocVMName, taskConfig.SSHUser, taskConfig.SSHPassword, cfg.StdoutPath, cfg.StderrPath)
+	go d.client.Exec(syslogCtx, vmConfig, ExecOptions{
+		Command: []string{"/usr/bin/log", "stream", "--style", "syslog", "--level=info"},
+		Stdout:  stdoutFile,
+		Stderr:  stderrFile,
+		Tty:     false,
+	})
 	d.tasks.Set(cfg.ID, h)
 	go h.run()
 
@@ -353,11 +356,11 @@ func (d *Driver) StopTask(taskID string, timeout time.Duration, signal string) e
 	// Attempt to gracefully stop the VM via the virtualizer
 	var taskConfig TaskConfig
 	if err := handle.taskConfig.DecodeDriverConfig(&taskConfig); err == nil {
-		if err := d.virtualizer.StopVM(d.ctx, allocVMName, timeout); err != nil {
+		if err := d.client.Stop(d.ctx, allocVMName, timeout); err != nil {
 			d.logger.Warn("failed to stop VM via virtualizer", "error", err)
 		}
 
-		if err := d.virtualizer.DeleteVM(d.ctx, allocVMName); err != nil {
+		if err := d.client.Delete(d.ctx, allocVMName); err != nil {
 			d.logger.Warn("failed to delete VM via virtualizer", "error", err)
 		}
 	}
@@ -453,14 +456,11 @@ func (d *Driver) ExecTask(taskID string, cmd []string, timeout time.Duration) (*
 func (d *Driver) ExecTaskStreaming(ctx context.Context, taskID string, opts *drivers.ExecOptions) (*drivers.ExitResult, error) {
 	defer opts.Stdout.Close()
 	defer opts.Stderr.Close()
+	defer opts.Stdin.Close()
 
 	handle, ok := d.tasks.Get(taskID)
 	if !ok {
 		return nil, drivers.ErrTaskNotFound
-	}
-
-	if len(opts.Command) == 0 {
-		return nil, fmt.Errorf("command is required but was empty")
 	}
 
 	var taskCfg TaskConfig
@@ -468,107 +468,26 @@ func (d *Driver) ExecTaskStreaming(ctx context.Context, taskID string, opts *dri
 		return nil, fmt.Errorf("failed to decode driver config: %v", err)
 	}
 
-	vmName := d.generateVMName(handle.taskConfig.AllocID)
-
-	ip, err := d.virtualizer.IPAddress(ctx, vmName)
-	if err != nil || ip == "" {
-		return nil, fmt.Errorf("failed to get VM IP: %v", err)
+	execOptions := ExecOptions{
+		Command:  opts.Command,
+		Tty:      opts.Tty,
+		Stdin:    opts.Stdin,
+		Stdout:   opts.Stdout,
+		Stderr:   opts.Stderr,
+		ResizeCh: opts.ResizeCh,
 	}
 
-	sshArgs := []string{"ssh", "-q", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null"}
-	if opts.Tty {
-		sshArgs = append(sshArgs, "-tt")
-	} else {
-		sshArgs = append(sshArgs, "-T")
-	}
-	sshArgs = append(sshArgs, fmt.Sprintf("%s@%s", taskCfg.SSHUser, ip))
-	sshArgs = append(sshArgs, opts.Command...)
-
-	cmd := exec.CommandContext(ctx, "sshpass", append([]string{"-p", taskCfg.SSHPassword}, sshArgs...)...)
-	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
-
-	if opts.Tty {
-		ptmx, err := pty.Start(cmd)
-		if err != nil {
-			return nil, fmt.Errorf("failed to start ssh command: %v", err)
-		}
-		defer ptmx.Close()
-
-		go func() { io.Copy(ptmx, opts.Stdin) }()
-		go func() { io.Copy(opts.Stdout, ptmx) }()
-
-		go func() {
-			for sz := range opts.ResizeCh {
-				_ = pty.Setsize(ptmx, &pty.Winsize{Rows: uint16(sz.Height), Cols: uint16(sz.Width)})
-			}
-		}()
-
-		err = cmd.Wait()
-	} else {
-		cmd.Stdin = opts.Stdin
-		cmd.Stdout = opts.Stdout
-		cmd.Stderr = opts.Stderr
-
-		if err := cmd.Start(); err != nil {
-			return nil, fmt.Errorf("failed to start ssh command: %v", err)
-		}
-		err = cmd.Wait()
+	vmConfig := VMConfig{
+		TaskConfig:  taskCfg,
+		NomadConfig: handle.taskConfig,
 	}
 
-	exitCode := 0
+	exitCode, err := d.client.Exec(ctx, vmConfig, execOptions)
 	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			exitCode = ee.ExitCode()
-		} else if ctx.Err() != nil {
-			return nil, ctx.Err()
-		} else {
-			return nil, err
-		}
-	} else if cmd.ProcessState != nil {
-		exitCode = cmd.ProcessState.ExitCode()
+		return nil, fmt.Errorf("failed to exec command: %v", err)
 	}
 
 	return &drivers.ExitResult{ExitCode: exitCode}, nil
-}
-
-// streamSyslog streams a VM's syslog output to the given stdout/stderr files.
-func (d *Driver) streamSyslog(ctx context.Context, vmName, user, password, stdoutPath, stderrPath string) {
-	ip, err := d.virtualizer.IPAddress(ctx, vmName)
-	for i := 0; i < 5 && (err != nil || ip == ""); i++ {
-		time.Sleep(2 * time.Second)
-		ip, err = d.virtualizer.IPAddress(ctx, vmName)
-	}
-	if err != nil || ip == "" {
-		d.logger.Error("failed to get VM IP for syslog streaming", "vm", vmName, "err", err)
-		return
-	}
-
-	stdoutFile, err := os.OpenFile(stdoutPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		d.logger.Error("failed to open stdout file", "err", err)
-		return
-	}
-	defer stdoutFile.Close()
-
-	stderrFile, err := os.OpenFile(stderrPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		d.logger.Error("failed to open stderr file", "err", err)
-		return
-	}
-	defer stderrFile.Close()
-
-	cmd := exec.CommandContext(ctx, "sshpass", "-p", password, "ssh",
-		"-o", "StrictHostKeyChecking=no",
-		"-o", "UserKnownHostsFile=/dev/null",
-		fmt.Sprintf("%s@%s", user, ip),
-		"/usr/bin/log", "stream", "--style", "syslog", "--level=info")
-
-	cmd.Stdout = stdoutFile
-	cmd.Stderr = stderrFile
-
-	if err := cmd.Run(); err != nil && ctx.Err() == nil {
-		d.logger.Error("syslog streaming command failed", "err", err)
-	}
 }
 
 func (d *Driver) generateVMName(allocationID string) string {
