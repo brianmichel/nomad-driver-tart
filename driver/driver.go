@@ -196,8 +196,6 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		})
 	}
 
-	d.logger.Info("resources block looks like this", "resources", cfg.Resources)
-
 	vmConfig := VMConfig{
 		TaskConfig:  taskConfig,
 		NomadConfig: cfg,
@@ -284,22 +282,33 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to open stdout file: %v", err)
 	}
-	defer stdoutFile.Close()
 
 	stderrFile, err := os.OpenFile(cfg.StderrPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to open stderr file: %v", err)
 	}
-	defer stderrFile.Close()
 
 	syslogCtx, cancel := context.WithCancel(d.ctx)
 	h.syslogCancel = cancel
-	go d.client.Exec(syslogCtx, vmConfig, ExecOptions{
-		Command: []string{"/usr/bin/log", "stream", "--style", "syslog", "--level=info"},
-		Stdout:  stdoutFile,
-		Stderr:  stderrFile,
-		Tty:     false,
-	})
+	d.logger.Trace("Starting log streaming", "stdout_path", cfg.StdoutPath, "stderr_path", cfg.StderrPath)
+
+	// Start the streaming in a goroutine that handles file closing
+	go func() {
+		defer stdoutFile.Close()
+		defer stderrFile.Close()
+
+		_, err := d.client.Exec(syslogCtx, vmConfig, ExecOptions{
+			Command: []string{"/usr/bin/log", "stream", "--style", "syslog", "--level=info"},
+			Stdout:  stdoutFile,
+			Stderr:  stderrFile,
+			Tty:     false,
+		})
+
+		if err != nil {
+			d.logger.Error("Failed to start log streaming", "error", err)
+		}
+
+	}()
 	d.tasks.Set(cfg.ID, h)
 	go h.run()
 
