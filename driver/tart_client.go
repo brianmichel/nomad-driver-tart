@@ -52,7 +52,7 @@ func (c *TartClient) Available(ctx context.Context) (string, error) {
 	}
 
 	version := strings.TrimSpace(stdout.String())
-	c.logger.Debug("Tart version", "version", version)
+	c.logger.Trace("Tart version", "version", version)
 	return version, nil
 }
 
@@ -61,7 +61,7 @@ func (c *TartClient) Setup(ctx context.Context, config VMConfig) (string, error)
 	vmName := c.generateVMName(config.NomadConfig.AllocID)
 	url := config.TaskConfig.URL
 
-	c.logger.Debug("Setting up Tart VM", "name", vmName, "url", url)
+	c.logger.Trace("Setting up Tart VM", "name", vmName, "url", url)
 	cmd := exec.CommandContext(ctx, "tart", "clone", url, vmName)
 
 	// Configure VM resources before starting it using the Nomad resources block
@@ -97,7 +97,7 @@ func (c *TartClient) Start(ctx context.Context, vmName string, headless bool) (i
 		args = append(args, "--no-graphics")
 	}
 
-	c.logger.Debug("Starting Tart VM", "name", vmName, "headless", headless)
+	c.logger.Trace("Starting Tart VM", "name", vmName, "headless", headless)
 	cmd := exec.CommandContext(ctx, "tart", args...)
 
 	var stderr bytes.Buffer
@@ -116,7 +116,7 @@ func (c *TartClient) Stop(ctx context.Context, vmName string, timeout time.Durat
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	c.logger.Debug("Stopping Tart VM", "name", vmName)
+	c.logger.Trace("Stopping Tart VM", "name", vmName)
 	cmd := exec.CommandContext(ctx, "tart", "stop", vmName)
 
 	var stderr bytes.Buffer
@@ -177,7 +177,7 @@ func (c *TartClient) Status(ctx context.Context, vmName string) (VMState, error)
 
 // CloneVM clones a Tart VM
 func (c *TartClient) CloneVM(ctx context.Context, sourceVM, targetVM string) error {
-	c.logger.Debug("Cloning Tart VM", "source", sourceVM, "target", targetVM)
+	c.logger.Trace("Cloning Tart VM", "source", sourceVM, "target", targetVM)
 	cmd := exec.CommandContext(ctx, "tart", "clone", sourceVM, targetVM)
 
 	var stderr bytes.Buffer
@@ -193,7 +193,7 @@ func (c *TartClient) CloneVM(ctx context.Context, sourceVM, targetVM string) err
 
 // DeleteVM deletes a Tart VM
 func (c *TartClient) Delete(ctx context.Context, vmName string) error {
-	c.logger.Debug("Deleting Tart VM", "name", vmName)
+	c.logger.Trace("Deleting Tart VM", "name", vmName)
 	cmd := exec.CommandContext(ctx, "tart", "delete", vmName)
 
 	var stderr bytes.Buffer
@@ -310,7 +310,7 @@ func (c *TartClient) SetVMResources(ctx context.Context, vmName string, cpu, mem
 		return nil
 	}
 
-	c.logger.Debug("Setting VM resources", "name", vmName, "args", args)
+	c.logger.Trace("Setting VM resources", "name", vmName, "args", args)
 	cmd := exec.CommandContext(ctx, "tart", args...)
 
 	var stderr bytes.Buffer
