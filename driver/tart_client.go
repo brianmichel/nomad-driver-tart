@@ -5,14 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"os"
+	"net"
 	"os/exec"
 	"strings"
 	"time"
 
-	"github.com/creack/pty"
 	"github.com/hashicorp/go-hclog"
+	"golang.org/x/crypto/ssh"
 )
 
 // TartClient is a wrapper around the tart CLI that implements the Virtualizer interface
@@ -223,7 +222,7 @@ func (c *TartClient) IPAddress(ctx context.Context, vmName string) (string, erro
 	return strings.TrimSpace(stdout.String()), nil
 }
 
-// Exec executes an SSH command on the VM
+// Exec executes an SSH command on the VM using native Go SSH client
 func (c *TartClient) Exec(ctx context.Context, config VMConfig, opts ExecOptions) (int, error) {
 	if len(opts.Command) == 0 {
 		return -1, fmt.Errorf("command is required but was empty")
@@ -235,62 +234,70 @@ func (c *TartClient) Exec(ctx context.Context, config VMConfig, opts ExecOptions
 	if err != nil || ip == "" {
 		return -1, fmt.Errorf("failed to get VM IP: %v", err)
 	}
+	// SSH client config with password authentication
+	sshConfig := &ssh.ClientConfig{
+		User: config.TaskConfig.SSHUser,
+		Auth: []ssh.AuthMethod{
+			ssh.Password(config.TaskConfig.SSHPassword),
+		},
+		// TODO: Implement proper host key verification, we can probably just match the IP addresses.
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         30 * time.Second,
+	}
 
-	sshArgs := []string{"-q", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null"}
+	// Connect to SSH server
+	conn, err := ssh.Dial("tcp", net.JoinHostPort(ip, "22"), sshConfig)
+	if err != nil {
+		return -1, fmt.Errorf("failed to dial: %v", err)
+	}
+	defer conn.Close()
+
+	// Create a session
+	session, err := conn.NewSession()
+	if err != nil {
+		return -1, fmt.Errorf("failed to create session: %v", err)
+	}
+	defer session.Close()
+
+	// Set up input/output
+	session.Stdin = opts.Stdin
+	session.Stdout = opts.Stdout
+	session.Stderr = opts.Stderr
+
+	// Handle TTY if needed
 	if opts.Tty {
-		sshArgs = append(sshArgs, "-tt")
-	} else {
-		sshArgs = append(sshArgs, "-T")
-	}
-	sshArgs = append(sshArgs, fmt.Sprintf("%s@%s", config.TaskConfig.SSHUser, ip))
-	sshArgs = append(sshArgs, opts.Command...)
-
-	sshPassArgs := []string{"-p", config.TaskConfig.SSHPassword, "ssh"}
-	sshPassArgs = append(sshPassArgs, sshArgs...)
-
-	cmd := exec.CommandContext(ctx, "sshpass", sshPassArgs...)
-	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
-
-	var sshErr error
-	if opts.Tty {
-		ptmx, err := pty.Start(cmd)
-		if err != nil {
-			return -1, fmt.Errorf("failed to start ssh command: %v", err)
+		// Set up terminal modes
+		modes := ssh.TerminalModes{
+			ssh.ECHO:          0,     // disable echoing
+			ssh.TTY_OP_ISPEED: 14400, // input speed = 14.4kbaud
+			ssh.TTY_OP_OSPEED: 14400, // output speed = 14.4kbaud
 		}
-		defer ptmx.Close()
 
-		go func() { io.Copy(ptmx, opts.Stdin) }()
-		go func() { io.Copy(opts.Stdout, ptmx) }()
-
-		go func() {
-			for sz := range opts.ResizeCh {
-				_ = pty.Setsize(ptmx, &pty.Winsize{Rows: uint16(sz.Height), Cols: uint16(sz.Width)})
-			}
-		}()
-
-		sshErr = cmd.Wait()
-	} else {
-		cmd.Stdin = opts.Stdin
-		cmd.Stdout = opts.Stdout
-		cmd.Stderr = opts.Stderr
-
-		sshErr = cmd.Run()
-	}
-
-	exitCode := 0
-	if sshErr != nil {
-		if ee, ok := sshErr.(*exec.ExitError); ok {
-			exitCode = ee.ExitCode()
-		} else if ctx.Err() != nil {
-			return -1, ctx.Err()
-		} else {
-			return -1, sshErr
+		// Request pseudo terminal
+		if err := session.RequestPty("xterm", 40, 80, modes); err != nil {
+			return -1, fmt.Errorf("request for pseudo terminal failed: %v", err)
 		}
-	} else if cmd.ProcessState != nil {
-		exitCode = cmd.ProcessState.ExitCode()
+
+		// Handle window resizing
+		if opts.ResizeCh != nil {
+			go func() {
+				for sz := range opts.ResizeCh {
+					session.WindowChange(sz.Height, sz.Width)
+				}
+			}()
+		}
 	}
 
-	return exitCode, nil
+	// Run the command
+	cmd := strings.Join(opts.Command, " ")
+	if err := session.Run(cmd); err != nil {
+		if exitErr, ok := err.(*ssh.ExitError); ok {
+			return exitErr.ExitStatus(), nil
+		}
+		return -1, fmt.Errorf("failed to run command: %v", err)
+	}
+
+	return 0, nil
 }
 
 // SetVMResources modifies CPU cores, memory (MB), and disk size (GB) for a VM.
