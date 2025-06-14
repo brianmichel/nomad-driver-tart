@@ -439,9 +439,14 @@ func (d *Driver) TaskStats(ctx context.Context, taskID string, interval time.Dur
 	}
 
 	outCh := make(chan *drivers.TaskResourceUsage)
-	tracker := newVMStatsTracker(d.compute)
-	vmName := d.generateVMName(h.taskConfig.AllocID)
-	vmPath := vmPathFor(vmName)
+	var taskCfg TaskConfig
+	if err := h.taskConfig.DecodeDriverConfig(&taskCfg); err != nil {
+		taskCfg = TaskConfig{}
+	}
+	vmConfig := VMConfig{
+		TaskConfig:  taskCfg,
+		NomadConfig: h.taskConfig,
+	}
 
 	go func() {
 		defer close(outCh)
@@ -454,17 +459,10 @@ func (d *Driver) TaskStats(ctx context.Context, taskID string, interval time.Dur
 					return
 				}
 
-				vStats, vAgg := tracker.collect(vmPath)
-				if vAgg != nil {
-					stats.ResourceUsage.CpuStats.SystemMode += vAgg.ResourceUsage.CpuStats.SystemMode
-					stats.ResourceUsage.CpuStats.UserMode += vAgg.ResourceUsage.CpuStats.UserMode
-					stats.ResourceUsage.CpuStats.Percent += vAgg.ResourceUsage.CpuStats.Percent
-					stats.ResourceUsage.CpuStats.TotalTicks += vAgg.ResourceUsage.CpuStats.TotalTicks
-					stats.ResourceUsage.MemoryStats.RSS += vAgg.ResourceUsage.MemoryStats.RSS
-					stats.ResourceUsage.MemoryStats.Swap += vAgg.ResourceUsage.MemoryStats.Swap
-					for pid, ru := range vStats {
-						stats.Pids[pid] = ru
-					}
+				gUsage, err := guestStats(ctx, d.client, vmConfig)
+				if err == nil && gUsage != nil {
+					stats.ResourceUsage.CpuStats.Percent += gUsage.CpuStats.Percent
+					stats.ResourceUsage.MemoryStats.RSS += gUsage.MemoryStats.RSS
 				}
 
 				select {
