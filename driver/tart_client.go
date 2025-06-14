@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/url"
 	"os/exec"
 	"strings"
 	"time"
@@ -57,6 +58,23 @@ func (c *TartClient) Available(ctx context.Context) (string, error) {
 
 // SetupVM creates a new Tart VM from a URL
 func (c *TartClient) Setup(ctx context.Context, config VMConfig) (string, error) {
+	// Login to the container registry if authentication is provided
+	if config.TaskConfig.Auth.IsValid() {
+		netUrl, err := url.Parse(config.TaskConfig.URL)
+		if err != nil {
+			return "", fmt.Errorf("failed to parse URL: %v", err)
+		}
+		loginCmd := exec.CommandContext(ctx, "tart", "login", netUrl.Host, "--username", config.TaskConfig.Auth.Username, "--password-stdin")
+		loginCmd.Stdin = strings.NewReader(config.TaskConfig.Auth.Password)
+
+		var stderr bytes.Buffer
+		loginCmd.Stderr = &stderr
+
+		if err := loginCmd.Run(); err != nil {
+			return "", fmt.Errorf("failed to login to container registry: %v (stderr: %s)", err, stderr.String())
+		}
+	}
+
 	vmName := c.generateVMName(config.NomadConfig.AllocID)
 	url := config.TaskConfig.URL
 
