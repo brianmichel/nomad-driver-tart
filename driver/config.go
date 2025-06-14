@@ -16,7 +16,17 @@ type TaskConfig struct {
 	ShowUI      bool   `codec:"show_ui"`
 	// DiskSize is the desired disk size of the VM in gigabytes. Setting this
 	// to zero will leave the disk size unchanged.
-	DiskSize int `codec:"disk_size"`
+	DiskSize int  `codec:"disk_size"`
+	Auth     Auth `codec:"auth"`
+}
+
+type Auth struct {
+	Username string `codec:"username"`
+	Password string `codec:"password"`
+}
+
+func (a Auth) IsValid() bool {
+	return a.Username != "" && a.Password != ""
 }
 
 var (
@@ -37,5 +47,9 @@ var (
 		"ssh_password": hclspec.NewAttr("ssh_password", "string", true),
 		"show_ui":      hclspec.NewDefault(hclspec.NewAttr("show_ui", "bool", false), hclspec.NewLiteral("false")),
 		"disk_size":    hclspec.NewAttr("disk_size", "number", false),
+		"auth": hclspec.NewBlock("auth", true, hclspec.NewObject(map[string]*hclspec.Spec{
+			"username": hclspec.NewAttr("username", "string", true),
+			"password": hclspec.NewAttr("password", "string", true),
+		})),
 	})
 )
