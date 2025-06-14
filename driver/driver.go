@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/go-hclog"
+	"github.com/hashicorp/nomad/client/lib/cpustats"
 	"github.com/hashicorp/nomad/drivers/shared/eventer"
 	"github.com/hashicorp/nomad/drivers/shared/executor"
 	"github.com/hashicorp/nomad/plugins/base"
@@ -73,6 +74,9 @@ type Driver struct {
 
 	// client is the interface for interacting with virtual machines
 	client VirtualizationClient
+
+	// compute is the cpu topology information used for stats aggregation
+	compute cpustats.Compute
 }
 
 // TaskState is the state which is encoded in the handle returned in
@@ -126,6 +130,7 @@ func (d *Driver) SetConfig(cfg *base.Config) error {
 	d.config = &config
 	if cfg.AgentConfig != nil {
 		d.nomadConfig = cfg.AgentConfig.Driver
+		d.compute = cfg.AgentConfig.Compute()
 	}
 
 	return nil
@@ -427,7 +432,51 @@ func (d *Driver) TaskStats(ctx context.Context, taskID string, interval time.Dur
 	if !ok {
 		return nil, drivers.ErrTaskNotFound
 	}
-	return h.exec.Stats(ctx, interval)
+
+	execCh, err := h.exec.Stats(ctx, interval)
+	if err != nil {
+		return nil, err
+	}
+
+	outCh := make(chan *drivers.TaskResourceUsage)
+	tracker := newVMStatsTracker(d.compute)
+	vmName := d.generateVMName(h.taskConfig.AllocID)
+	vmPath := vmPathFor(vmName)
+
+	go func() {
+		defer close(outCh)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case stats, ok := <-execCh:
+				if !ok {
+					return
+				}
+
+				vStats, vAgg := tracker.collect(vmPath)
+				if vAgg != nil {
+					stats.ResourceUsage.CpuStats.SystemMode += vAgg.ResourceUsage.CpuStats.SystemMode
+					stats.ResourceUsage.CpuStats.UserMode += vAgg.ResourceUsage.CpuStats.UserMode
+					stats.ResourceUsage.CpuStats.Percent += vAgg.ResourceUsage.CpuStats.Percent
+					stats.ResourceUsage.CpuStats.TotalTicks += vAgg.ResourceUsage.CpuStats.TotalTicks
+					stats.ResourceUsage.MemoryStats.RSS += vAgg.ResourceUsage.MemoryStats.RSS
+					stats.ResourceUsage.MemoryStats.Swap += vAgg.ResourceUsage.MemoryStats.Swap
+					for pid, ru := range vStats {
+						stats.Pids[pid] = ru
+					}
+				}
+
+				select {
+				case outCh <- stats:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+	}()
+
+	return outCh, nil
 }
 
 // TaskEvents returns a channel that the plugin can use to emit task related events.
