@@ -28,7 +28,8 @@ jobs:
           security import $TEMP_P12 \
             -k ~/Library/Keychains/login.keychain \
             -P ${{ secrets.APPLE_SIGNING_IDENTITY_PASSWORD }} \
-            -T /usr/bin/codesign
+            -T /usr/bin/codesign \
+            -T /usr/bin/security
       - name: Install Signing Key
         run: |
           echo "${{ secrets.COSIGN_KEY }}" | base64 -d -o cosign.key
