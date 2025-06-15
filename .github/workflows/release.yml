@@ -17,9 +17,26 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: sigstore/cosign-installer@v3.8.1
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.inputs.ref || github.ref }}
+      - name: Setup Apple Signing Identity
+        run: |
+          # Setup signing identity into temporary file
+          TEMP_P12=$(mktemp /tmp/signing.p12)
+          echo "${{ secrets.APPLE_SIGNING_IDENTITY }}" | base64 -d -o $TEMP_P12
+
+          # Setup temporary build keychain
+          security create-keychain -p "${{ secrets.BUILD_KEYCHAIN_PASSWORD }}" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "${{ secrets.BUILD_KEYCHAIN_PASSWORD }}" build.keychain
+          security import $TEMP_P12 -k build.keychain -P "${{ secrets.APPLE_SIGNING_IDENTITY_PASSWORD }}" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "${{ secrets.BUILD_KEYCHAIN_PASSWORD }}" build.keychain
+          security find-identity -v -p codesigning build.keychain
+      - name: Install Cosign Key
+        run: |
+          echo "${{ secrets.COSIGN_KEY }}" | base64 -d -o cosign.key
       - uses: actions/setup-go@v4
         with:
           go-version-file: go.mod
@@ -31,6 +48,7 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COSIGN_PWD: ${{ secrets.COSIGN_PASSWORD }}
       - name: Run GoReleaser (snapshot)
         if: github.event_name == 'workflow_dispatch'
         uses: goreleaser/goreleaser-action@v6.3.0
@@ -39,6 +57,7 @@ jobs:
           args: release --snapshot --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COSIGN_PWD: ${{ secrets.COSIGN_PASSWORD }}
       - name: Upload snapshot artifacts
         if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4

@@ -10,6 +10,9 @@ builds:
     env:
       - CGO_ENABLED=0
     ldflags: -s -w
+    hooks:
+      post:
+        - sh codesign.sh "Developer ID Application" dist
 
 archives:
   - id: nomad-driver-tart
@@ -19,6 +22,18 @@ archives:
     files:
       - LICENSE
       - README.md
+
+signs:
+  - cmd: cosign
+    stdin: "{{ .Env.COSIGN_PWD }}"
+    args:
+      - "sign-blob"
+      - "--key=cosign.key"
+      - "--output-signature=${signature}"
+      - "${artifact}"
+      - "--yes"
+    artifacts: all
+
 release:
   github:
     owner: brianmichel
