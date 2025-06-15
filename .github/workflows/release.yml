@@ -24,7 +24,7 @@ jobs:
       - name: Setup Apple Signing Identity
         run: |
           TEMP_P12=$(mktemp /tmp/signing.p12)
-          echo "${{ secrets.APPLE_SIGNING_IDENTITY }}" > $TEMP_P12
+          echo "${{ secrets.APPLE_SIGNING_IDENTITY }}" | base64 -d -o $TEMP_P12
           security import $TEMP_P12 \
             -k ~/Library/Keychains/login.keychain \
             -P ${{ secrets.APPLE_SIGNING_IDENTITY_PASSWORD }} \
