@@ -19,6 +19,18 @@ archives:
     files:
       - LICENSE
       - README.md
+
+signs:
+  - cmd: cosign
+    stdin: "{{ .Env.COSIGN_PWD }}"
+    args:
+      - "sign-blob"
+      - "--key=cosign.key"
+      - "--output-signature=${signature}"
+      - "${artifact}"
+      - "--yes"
+    artifacts: all
+
 release:
   github:
     owner: brianmichel
