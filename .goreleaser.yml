@@ -10,6 +10,9 @@ builds:
     env:
       - CGO_ENABLED=0
     ldflags: -s -w
+    hooks:
+      post:
+        - sh codesign.sh "Developer ID Application" dist
 
 archives:
   - id: nomad-driver-tart
