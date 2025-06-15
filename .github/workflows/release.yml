@@ -22,7 +22,8 @@ jobs:
           ref: ${{ github.event.inputs.ref || github.ref }}
       - name: Install Signing Key
         run: |
-          base64 -d "${{ secrets.COSIGN_KEY }}" -o cosign.key
+          echo "${{ secrets.COSIGN_KEY }}" > cosign.base64.key
+          base64 -d -i cosign.base64.key -o cosign.key
       - uses: actions/setup-go@v4
         with:
           go-version-file: go.mod
