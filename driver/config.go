@@ -47,7 +47,7 @@ var (
 		"ssh_password": hclspec.NewAttr("ssh_password", "string", true),
 		"show_ui":      hclspec.NewDefault(hclspec.NewAttr("show_ui", "bool", false), hclspec.NewLiteral("false")),
 		"disk_size":    hclspec.NewAttr("disk_size", "number", false),
-		"auth": hclspec.NewBlock("auth", true, hclspec.NewObject(map[string]*hclspec.Spec{
+		"auth": hclspec.NewBlock("auth", false, hclspec.NewObject(map[string]*hclspec.Spec{
 			"username": hclspec.NewAttr("username", "string", true),
 			"password": hclspec.NewAttr("password", "string", true),
 		})),
