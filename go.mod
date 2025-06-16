@@ -2,10 +2,12 @@ module github.com/brianmichel/nomad-driver-tart
 
 go 1.24.4
 
+replace github.com/opencontainers/runc => github.com/opencontainers/runc v1.1.9
+
 require (
 	github.com/hashicorp/go-hclog v1.6.3
 	github.com/hashicorp/go-plugin v1.6.3
-	github.com/hashicorp/nomad v1.10.2
+	github.com/hashicorp/nomad v1.10.1
 	golang.org/x/crypto v0.39.0
 )
 
@@ -23,7 +25,7 @@ require (
 	github.com/armon/go-radix v1.0.0 // indirect
 	github.com/bgentry/speakeasy v0.2.0 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
-	github.com/checkpoint-restore/go-criu/v6 v6.3.0 // indirect
+	github.com/checkpoint-restore/go-criu/v5 v5.3.0 // indirect
 	github.com/cilium/ebpf v0.18.0 // indirect
 	github.com/container-storage-interface/spec v1.11.0 // indirect
 	github.com/containerd/console v1.0.5 // indirect
@@ -107,14 +109,11 @@ require (
 	github.com/moby/sys/capability v0.4.0 // indirect
 	github.com/moby/sys/mount v0.3.4 // indirect
 	github.com/moby/sys/mountinfo v0.7.2 // indirect
-	github.com/moby/sys/user v0.4.0 // indirect
-	github.com/moby/sys/userns v0.1.0 // indirect
 	github.com/mrunalp/fileutils v0.5.1 // indirect
 	github.com/oklog/run v1.1.0 // indirect
-	github.com/opencontainers/cgroups v0.0.2 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
-	github.com/opencontainers/runc v1.3.0 // indirect
+	github.com/opencontainers/runc v1.2.6 // indirect
 	github.com/opencontainers/runtime-spec v1.2.1 // indirect
 	github.com/opencontainers/selinux v1.12.0 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect

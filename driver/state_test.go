@@ -51,7 +51,7 @@ func TestTaskStoreConcurrentAccess(t *testing.T) {
 
 	// Create a wait group to synchronize goroutines
 	var wg sync.WaitGroup
-	
+
 	// Create a map to track the last handle we expect for each key
 	expectedHandles := make(map[string]*taskHandle)
 	var mu sync.Mutex
