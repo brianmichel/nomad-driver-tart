@@ -115,6 +115,8 @@ EOH
         # Optional resource configuration for the VM
         # disk_size is the desired disk size in gigabytes
         disk_size  = 60
+        # Select the network mode for Tart. Supported values: "host", "softnet", etc.
+        network    = "host"
       }
 
       resources {

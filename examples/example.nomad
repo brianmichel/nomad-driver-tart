@@ -44,6 +44,8 @@ EOH
         # Whether or not to show the built-in Tart UI for the VM
         # Defaults to false
         show_ui = true
+        # Network mode for Tart VM
+        network = "host"
       }
 
       resources {
