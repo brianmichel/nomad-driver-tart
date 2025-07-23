@@ -33,7 +33,7 @@ job "macos-sequoia-vanilla" {
         data        = <<EOH
 SSH_PASSWORD={{ with nomadVar "nomad/jobs/macos-sequoia-vanilla" }}{{ .ssh_password }}{{ end }}
 EOH
-        destination = "secrets/file.env"
+        destination = "secrets/secrets.env"
         env         = true
       }
 

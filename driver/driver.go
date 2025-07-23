@@ -235,6 +235,9 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		args = append(args, "--no-graphics")
 	}
 
+	// Add secrets dir as read-only mount
+	args = append(args, fmt.Sprintf("--dir=%s:ro", cfg.TaskDir().SecretsDir))
+
 	execCmd := &executor.ExecCommand{
 		Cmd:              "tart",
 		Args:             args,
