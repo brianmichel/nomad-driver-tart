@@ -234,6 +234,9 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	if !taskConfig.ShowUI {
 		args = append(args, "--no-graphics")
 	}
+	if taskConfig.Network != "" {
+		args = append(args, "--net", taskConfig.Network)
+	}
 
 	// Add secrets dir as read-only mount
 	args = append(args, fmt.Sprintf("--dir=%s:ro", cfg.TaskDir().SecretsDir))
@@ -247,6 +250,10 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		StdoutPath:       cfg.StdoutPath,
 		StderrPath:       cfg.StderrPath,
 		NetworkIsolation: cfg.NetworkIsolation,
+	}
+
+	if taskConfig.Network == "softnet" {
+		execCmd.User = "root"
 	}
 
 	ps, err := execImpl.Launch(execCmd)

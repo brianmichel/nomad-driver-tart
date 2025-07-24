@@ -14,6 +14,9 @@ type TaskConfig struct {
 	SSHUser     string `codec:"ssh_user"`
 	SSHPassword string `codec:"ssh_password"`
 	ShowUI      bool   `codec:"show_ui"`
+	// Network specifies the networking mode used when running the VM. Valid
+	// options include "host", "softnet", etc. Defaults to "host".
+	Network string `codec:"network"`
 	// DiskSize is the desired disk size of the VM in gigabytes. Setting this
 	// to zero will leave the disk size unchanged.
 	DiskSize int  `codec:"disk_size"`
@@ -46,6 +49,7 @@ var (
 		"ssh_user":     hclspec.NewAttr("ssh_user", "string", true),
 		"ssh_password": hclspec.NewAttr("ssh_password", "string", true),
 		"show_ui":      hclspec.NewDefault(hclspec.NewAttr("show_ui", "bool", false), hclspec.NewLiteral("false")),
+		"network":      hclspec.NewDefault(hclspec.NewAttr("network", "string", false), hclspec.NewLiteral("\"host\"")),
 		"disk_size":    hclspec.NewAttr("disk_size", "number", false),
 		"auth": hclspec.NewBlock("auth", false, hclspec.NewObject(map[string]*hclspec.Spec{
 			"username": hclspec.NewAttr("username", "string", true),
