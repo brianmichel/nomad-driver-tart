@@ -60,11 +60,11 @@ func (c *TartClient) Available(ctx context.Context) (string, error) {
 func (c *TartClient) Setup(ctx context.Context, config VMConfig) (string, error) {
 	// Login to the container registry if authentication is provided
 	if config.TaskConfig.Auth.IsValid() {
-		netUrl, err := url.Parse(config.TaskConfig.URL)
+		host, err := registryHost(config.TaskConfig.URL)
 		if err != nil {
 			return "", fmt.Errorf("failed to parse URL: %v", err)
 		}
-		loginCmd := exec.CommandContext(ctx, "tart", "login", netUrl.Host, "--username", config.TaskConfig.Auth.Username, "--password-stdin")
+		loginCmd := exec.CommandContext(ctx, "tart", "login", host, "--username", config.TaskConfig.Auth.Username, "--password-stdin")
 		loginCmd.Stdin = strings.NewReader(config.TaskConfig.Auth.Password)
 
 		var stderr bytes.Buffer
@@ -361,4 +361,26 @@ func convertTartStatus(tartStatus string) VMState {
 	default:
 		return VMStateStopped
 	}
+}
+
+// registryHost extracts the registry host from an image URL. It attempts to
+// parse the URL and, if no host is present, falls back to splitting the string
+// on the first '/'.
+func registryHost(image string) (string, error) {
+	u, err := url.Parse(image)
+	if err != nil {
+		return "", err
+	}
+
+	if u.Host != "" {
+		return u.Host, nil
+	}
+
+	// If the URL didn't have a host (e.g. missing scheme), derive it by
+	// taking everything before the first '/'.
+	parts := strings.SplitN(image, "/", 2)
+	if len(parts) == 0 || parts[0] == "" {
+		return "", fmt.Errorf("invalid image reference: %s", image)
+	}
+	return parts[0], nil
 }
