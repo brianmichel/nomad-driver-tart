@@ -238,6 +238,14 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	// Add secrets dir as read-only mount
 	args = append(args, fmt.Sprintf("--dir=%s:ro", cfg.TaskDir().SecretsDir))
 
+	// Apply networking options per task config
+	netArgs, err := buildTartNetworkArgs(taskConfig.Network)
+	if err != nil {
+		pluginClient.Kill()
+		return nil, nil, err
+	}
+	args = append(args, netArgs...)
+
 	execCmd := &executor.ExecCommand{
 		Cmd:              "tart",
 		Args:             args,

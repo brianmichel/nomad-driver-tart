@@ -23,6 +23,7 @@ This driver allows Nomad to manage the lifecycle of Tart VMs, providing a way to
 - Syslog streaming from VMs via SSH
 - Control VM CPU and memory via Nomad's `resources` block
 - Optional VM disk size configuration
+ - Networking modes: host-only, bridged, or Softnet with allow/expose
 
 ## Requirements
 
@@ -115,6 +116,15 @@ EOH
         # Optional resource configuration for the VM
         # disk_size is the desired disk size in gigabytes
         disk_size  = 60
+
+        # Networking (mutually exclusive modes)
+        # Default is shared/NAT (no option needed)
+        # network {
+        #   mode = "host"         # or "bridged" | "softnet" | "shared"
+        #   bridged_interface = "en0"   # required when mode = "bridged"
+        #   softnet_allow  = ["192.168.0.0/24"]
+        #   softnet_expose = ["2222:22", "8080:80"]
+        # }
       }
 
       resources {
@@ -164,6 +174,7 @@ This driver is currently in development and provides basic functionality. Future
 - Proper Tart VM lifecycle management
 - Resource isolation and management
 - Network configuration
+  - Bridged, host-only, and Softnet options
 - Volume mounts
 - Health checking
 
