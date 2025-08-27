@@ -63,7 +63,7 @@ plugin "nomad-driver-tart" {
 
 client {
   enabled = true
-  
+
   options {
     "driver.allowlist" = "tart"
   }
@@ -142,7 +142,7 @@ nomad agent -dev -config=./examples/agent.hcl -plugin-dir=$(pwd)
 2. In another terminal, run a job that uses the Tart driver:
 
 ```bash
-nomad run ./examples/example.nomad
+nomad run ./examples/example.nomad.hcl
 ```
 
 3. Check the status of the job and get the allocation ID:
@@ -176,4 +176,4 @@ A GitHub Actions workflow automatically formats, vets, and builds the driver for
 
 See [LICENSE](LICENSE) file.
 
-Tart's [LICENSE](https://github.com/cirruslabs/tart/blob/main/LICENSE) still applies to your usage of the underlying program. 
+Tart's [LICENSE](https://github.com/cirruslabs/tart/blob/main/LICENSE) still applies to your usage of the underlying program.
