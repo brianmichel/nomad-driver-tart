@@ -3,6 +3,7 @@ package driver
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -308,17 +309,8 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		defer stdoutFile.Close()
 		defer stderrFile.Close()
 
-		_, err := d.client.Exec(syslogCtx, vmConfig, ExecOptions{
-			Command: []string{"/usr/bin/log", "stream", "--style", "syslog", "--level=info"},
-			Stdout:  stdoutFile,
-			Stderr:  stderrFile,
-			Tty:     false,
-		})
-
-		if err != nil {
-			d.logger.Error("Failed to start log streaming", "error", err)
-		}
-
+		// Run syslog streaming with retry/backoff until it connects or context cancels
+		d.streamSyslogWithRetry(syslogCtx, vmConfig, stdoutFile, stderrFile)
 	}()
 	d.tasks.Set(cfg.ID, h)
 	go h.run()
@@ -512,4 +504,52 @@ func (d *Driver) ExecTaskStreaming(ctx context.Context, taskID string, opts *dri
 
 func (d *Driver) generateVMName(allocationID string) string {
 	return fmt.Sprintf("nomad-%s", allocationID)
+}
+
+// streamSyslogWithRetry attempts to start syslog streaming inside the VM using
+// SSH and retries with exponential backoff until it succeeds or the context is
+// cancelled. It can take a little while for the VM to become responsive so retrying
+// is critical to making this reliant.
+func (d *Driver) streamSyslogWithRetry(ctx context.Context, vmConfig VMConfig, stdout, stderr io.WriteCloser) {
+	backoff := 1 * time.Second
+	maxBackoff := 10 * time.Second
+
+	for {
+		// allow cancellation between attempts
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		// Attempt to start log streaming over SSH
+		_, err := d.client.Exec(ctx, vmConfig, ExecOptions{
+			Command: []string{"/usr/bin/log", "stream", "--style", "syslog", "--level=info"},
+			Stdout:  stdout,
+			Stderr:  stderr,
+			Tty:     false,
+		})
+
+		if err != nil {
+			// Check if we should give up due to cancellation
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			d.logger.Warn("Log streaming failed; will retry", "error", err)
+			time.Sleep(backoff)
+			if backoff < maxBackoff {
+				backoff *= 2
+				if backoff > maxBackoff {
+					backoff = maxBackoff
+				}
+			}
+			continue
+		}
+
+		// Exec returned without error; streaming ended or succeeded then exited.
+		return
+	}
 }

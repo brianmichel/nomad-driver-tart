@@ -38,7 +38,7 @@ EOH
       }
 
       config {
-        url          = "ghcr.io/cirruslabs/macos-sequoia-vanilla:latest"
+        url          = "ghcr.io/cirruslabs/macos-sequoia-base:latest"
         ssh_user     = "admin"
         ssh_password = "${SSH_PASSWORD}"
         # Whether or not to show the built-in Tart UI for the VM
@@ -47,7 +47,7 @@ EOH
         # Networking options (mutually exclusive)
         # Default: shared/NAT (no option required)
         # network {
-        #   mode = "bridged"           # or "host" | "softnet" | "shared"
+        #   mode = "bridged"           # or "host" | "softnet"
         #   bridged_interface = "en0"  # or "Wi-Fi" when mode = "bridged"
         #   softnet_allow = ["192.168.0.0/24"]
         #   softnet_expose = ["2222:22", "8080:80"]
