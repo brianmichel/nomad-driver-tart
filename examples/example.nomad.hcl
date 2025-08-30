@@ -3,7 +3,7 @@ job "macos-sequoia-vanilla" {
   type        = "service"
 
   update {
-    // Don't leave anything running in paralle when we're rescheduling.
+    // Don't leave anything running in parallel when we're rescheduling.
     max_parallel = 0
     // Downloading a VM image can take a while as they are
     // tens of GBs in size. Give our jobs enough grace to

@@ -250,7 +250,7 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	execCmd := &executor.ExecCommand{
 		Cmd:              "tart",
 		Args:             args,
-		Env:              cfg.EnvList(),
+		Env:              d.TartEnvList(cfg),
 		User:             cfg.User,
 		TaskDir:          cfg.TaskDir().Dir,
 		StdoutPath:       cfg.StdoutPath,
@@ -552,4 +552,13 @@ func (d *Driver) streamSyslogWithRetry(ctx context.Context, vmConfig VMConfig, s
 		// Exec returned without error; streaming ended or succeeded then exited.
 		return
 	}
+}
+
+func (d *Driver) TartEnvList(tc *drivers.TaskConfig) []string {
+	// Patch the env list to include the homebrew paths to help tart
+	// find other binaries (like softnet) as needed.
+	list := tc.EnvList()
+	list = append(list, "PATH=/opt/homebrew/bin:/opt/homebrew/sbin")
+
+	return list
 }
