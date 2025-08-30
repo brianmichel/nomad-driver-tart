@@ -3,7 +3,7 @@ job "macos-sequoia-vanilla" {
   type        = "service"
 
   update {
-    // Don't leave anything running in paralle when we're rescheduling.
+    // Don't leave anything running in parallel when we're rescheduling.
     max_parallel = 0
     // Downloading a VM image can take a while as they are
     // tens of GBs in size. Give our jobs enough grace to
@@ -38,12 +38,20 @@ EOH
       }
 
       config {
-        url          = "ghcr.io/cirruslabs/macos-sequoia-vanilla:latest"
+        url          = "ghcr.io/cirruslabs/macos-sequoia-base:latest"
         ssh_user     = "admin"
         ssh_password = "${SSH_PASSWORD}"
         # Whether or not to show the built-in Tart UI for the VM
         # Defaults to false
         show_ui = true
+        # Networking options (mutually exclusive)
+        # Default: shared/NAT (no option required)
+        # network {
+        #   mode = "bridged"           # or "host" | "softnet"
+        #   bridged_interface = "en0"  # or "Wi-Fi" when mode = "bridged"
+        #   softnet_allow = ["192.168.0.0/24"]
+        #   softnet_expose = ["2222:22", "8080:80"]
+        # }
       }
 
       resources {

@@ -18,6 +18,9 @@ type TaskConfig struct {
 	// to zero will leave the disk size unchanged.
 	DiskSize int  `codec:"disk_size"`
 	Auth     Auth `codec:"auth"`
+
+	// Network contains networking options for the VM
+	Network *NetworkConfig `codec:"network"`
 }
 
 type Auth struct {
@@ -51,5 +54,27 @@ var (
 			"username": hclspec.NewAttr("username", "string", true),
 			"password": hclspec.NewAttr("password", "string", true),
 		})),
+
+		// Networking options block
+		// mode: "host" | "bridged" | "softnet" | "shared" (default)
+		// softnet_allow/expose imply softnet when mode is not specified
+		"network": hclspec.NewBlock("network", false, hclspec.NewObject(map[string]*hclspec.Spec{
+			"mode":              hclspec.NewAttr("mode", "string", false),
+			"bridged_interface": hclspec.NewAttr("bridged_interface", "string", false),
+			"softnet_allow":     hclspec.NewAttr("softnet_allow", "list(string)", false),
+			"softnet_expose":    hclspec.NewAttr("softnet_expose", "list(string)", false),
+		})),
 	})
 )
+
+// NetworkConfig describes networking configuration for a task
+type NetworkConfig struct {
+	// Mode selects networking mode: "host", "bridged", "softnet", or "shared" (default NAT)
+	Mode string `codec:"mode"`
+	// BridgedInterface is used when Mode == "bridged" to select the interface
+	BridgedInterface string `codec:"bridged_interface"`
+	// SoftnetAllow CIDRs when using Softnet; implies Softnet if Mode unspecified
+	SoftnetAllow []string `codec:"softnet_allow"`
+	// SoftnetExpose EXTERNAL:INTERNAL TCP port forward specs when using Softnet; implies Softnet
+	SoftnetExpose []string `codec:"softnet_expose"`
+}
