@@ -21,6 +21,9 @@ type TaskConfig struct {
 
 	// Network contains networking options for the VM
 	Network *NetworkConfig `codec:"network"`
+
+	// Root disk options on how to configure the VM
+	RootDisk *RootDiskOptions `codec:"root_disk"`
 }
 
 type Auth struct {
@@ -64,6 +67,13 @@ var (
 			"softnet_allow":     hclspec.NewAttr("softnet_allow", "list(string)", false),
 			"softnet_expose":    hclspec.NewAttr("softnet_expose", "list(string)", false),
 		})),
+
+		// Root disk options block
+		"root_disk": hclspec.NewBlock("root_disk", false, hclspec.NewObject(map[string]*hclspec.Spec{
+			"readonly":     hclspec.NewDefault(hclspec.NewAttr("readonly", "bool", false), hclspec.NewLiteral("false")),
+			"caching_mode": hclspec.NewAttr("caching_mode", "string", false),
+			"sync_mode":    hclspec.NewAttr("sync_mode", "string", false),
+		})),
 	})
 )
 
@@ -77,4 +87,12 @@ type NetworkConfig struct {
 	SoftnetAllow []string `codec:"softnet_allow"`
 	// SoftnetExpose EXTERNAL:INTERNAL TCP port forward specs when using Softnet; implies Softnet
 	SoftnetExpose []string `codec:"softnet_expose"`
+}
+
+// Options to specify how the root disk of the VM should be
+// prepared by the tart tool.
+type RootDiskOptions struct {
+	ReadOnly    bool    `codec:"readonly"`
+	SyncMode    *string `codec:"sync_mode"`
+	CachingMode *string `codec:"caching_mode"`
 }
