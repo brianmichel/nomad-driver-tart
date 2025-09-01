@@ -59,6 +59,20 @@ EOH
         #   caching_mode = "automatic" # (optional), or "uncached" | "cached"
         #   sync_mode = "full"         # (optional), or "fsync" | "none"
         # }
+        # (optional) External directory mapping options
+        # Specify which directories on the physical machine to
+        # map into the virtual machine
+        # directory {
+        #   name = "downloads"
+        #   path = "/Users/admin/Downloads"
+        #   options = {
+        #     readonly = true
+        #   }
+        # }
+        # directory {
+        #   name = "desktop"
+        #   path = "/Users/admin/Desktop"
+        # }
       }
 
       resources {
