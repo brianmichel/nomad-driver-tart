@@ -74,4 +74,15 @@ type VirtualizationClient interface {
 	// 'user' specifies the user to run the command as.
 	// Returns the command output or an error.
 	Exec(ctx context.Context, config VMConfig, opts ExecOptions) (int, error)
+
+	// BuildStartArgs returns the CLI args needed to start the VM for the
+	// provided config (e.g., networking, disk, mounts). The returned slice
+	// should be suitable for passing to `tart` (or the underlying tool).
+	// The implementation may consult TaskConfig to include headless/UI flags.
+	BuildStartArgs(config VMConfig) ([]string, error)
+
+	// NeedsImageDownload reports whether the image referenced by the config
+	// must be pulled/downloaded before Setup, allowing the caller to emit
+	// progress events appropriately.
+	NeedsImageDownload(ctx context.Context, config VMConfig) (bool, error)
 }

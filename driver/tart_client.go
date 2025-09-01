@@ -351,6 +351,57 @@ func (c *TartClient) generateVMName(allocationID string) string {
 	return fmt.Sprintf("nomad-%s", allocationID)
 }
 
+// BuildStartArgs computes the full set of CLI arguments required to start a
+// VM based on the provided configuration. This centralizes tart-specific flag
+// construction away from the driver.
+func (c *TartClient) BuildStartArgs(config VMConfig) ([]string, error) {
+	vmName := c.generateVMName(config.NomadConfig.AllocID)
+
+	args := []string{"run", vmName}
+	if !config.TaskConfig.ShowUI {
+		args = append(args, "--no-graphics")
+	}
+
+	// Mount the Nomad task's secrets directory read-only if present
+	if config.NomadConfig != nil {
+		td := config.NomadConfig.TaskDir()
+		if td != nil && td.SecretsDir != "" {
+			args = append(args, fmt.Sprintf("--dir=%s:ro", td.SecretsDir))
+		}
+	}
+
+	netArgs, err := buildTartNetworkArgs(config.TaskConfig.Network)
+	if err != nil {
+		return nil, err
+	}
+
+	rootDiskArgs, err := buildRootDiskArgs(config.TaskConfig.RootDisk)
+	if err != nil {
+		return nil, err
+	}
+
+	args = append(args, netArgs...)
+	args = append(args, rootDiskArgs...)
+
+	return args, nil
+}
+
+// NeedsImageDownload returns true when the referenced image is not yet
+// available locally and must be pulled prior to setup.
+func (c *TartClient) NeedsImageDownload(ctx context.Context, config VMConfig) (bool, error) {
+	vms, err := c.List(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, vm := range vms {
+		// Tart stores locally downloaded VMs by the URL of the image
+		if vm.Name == config.TaskConfig.URL {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 // convertTartStatus converts tart status strings to our VMState type
 func convertTartStatus(tartStatus string) VMState {
 	switch strings.ToLower(tartStatus) {
