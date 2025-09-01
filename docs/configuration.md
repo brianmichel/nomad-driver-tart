@@ -7,7 +7,6 @@ This document explains all configuration parameters for the Tart VM Nomad driver
 
 - `enabled`: Enable the Tart driver plugin. Defaults to `true`.
   - Location: Nomad agent config (`plugin "nomad-driver-tart" { config { ... } }`).
-  - Reference: driver/config.go:6
 
 Example:
 
@@ -33,25 +32,19 @@ The following parameters go under the task’s driver config block `task { drive
 
 - `url` (string, required): Tart image reference to clone (e.g. `ghcr.io/cirruslabs/macos-sequoia-base:latest`).
   - Used to `tart clone` the VM before start.
-  - Reference: driver/config.go:12, driver/tart_client.go:55,92
 
 - `ssh_user` (string, required): Username the driver uses to SSH into the VM for logs/exec.
-  - Reference: driver/config.go:13, driver/tart_client.go:256
 
 - `ssh_password` (string, required): Password used for SSH.
   - Tip: inject via Nomad template and var, not hard-coded.
-  - Reference: driver/config.go:14, examples/example.nomad.hcl:30-39
 
 - `show_ui` (bool, optional, default: `false`): Show Tart’s built-in UI window; when `false` runs headless (`--no-graphics`).
-  - Reference: driver/config.go:15, driver/tart_client.go:338-345
 
 - `disk_size` (number, optional): Desired VM disk size in gigabytes. `0` leaves disk unchanged.
   - Applied via `tart set --disk-size` during setup.
-  - Reference: driver/config.go:18-19, driver/tart_client.go:128-151, 316-338
 
 - `auth { username, password }` (block, optional): Credentials for private image registries.
   - If set, driver runs `tart login <registry> --username <u> --password-stdin` prior to clone.
-  - Reference: driver/config.go:22-33, driver/tart_client.go:71-91, 404-439
 
 - `network { ... }` (block, optional): VM networking mode and Softnet options.
   - `mode` (string): One of `shared` (default NAT), `host`, `bridged`, or `softnet`.
@@ -59,14 +52,12 @@ The following parameters go under the task’s driver config block `task { drive
   - `softnet_allow` (list(string)): CIDR allowlist for Softnet; implies Softnet if mode omitted.
   - `softnet_expose` (list(string)): Port forwards `EXTERNAL:INTERNAL` for Softnet; implies Softnet if mode omitted.
   - Conflicts are validated (e.g., host mode cannot combine with Softnet/bridged flags).
-  - Reference: driver/config.go:37-52, driver/networking.go:1-63
 
 - `root_disk { ... }` (block, optional): Root disk runtime behavior.
   - `readonly` (bool, default: `false`): Mount root disk readonly (adds `ro`).
   - `caching_mode` (string): One of `automatic`, `uncached`, `cached`.
   - `sync_mode` (string): One of `fsync`, `full`, `none`.
   - Emitted as `--root-disk-opts=ro,caching=<mode>,sync=<mode>` as applicable.
-  - Reference: driver/config.go:55-65, driver/disk.go:1-40
 
 - `directory { ... }` (block list, optional): Mount host directories into the VM.
   - `name` (string, optional): Logical name for the mount (helps identify inside the guest).
@@ -75,7 +66,6 @@ The following parameters go under the task’s driver config block `task { drive
     - `readonly` (bool): Mount read-only (adds `:ro`).
     - `tag` (string): Add a custom tag (emitted as `tag=<value>`).
   - Each block generates a `--dir=<spec>` argument to Tart.
-  - Reference: driver/config.go:68-94, driver/directories.go:1-48, driver/directories_test.go
 
 
 ## VM Resources (CPU, Memory)
@@ -86,7 +76,6 @@ VM CPU and memory size are derived from the Nomad `resources` block:
 - `memory` (MB): Memory assigned to the VM.
 
 The driver configures these via `tart set --cpu <cores> --memory <MB>` during setup.
-- Reference: driver/tart_client.go:112-151, 316-338
 
 Example:
 
@@ -101,7 +90,6 @@ resources {
 ## Secrets and Env From Nomad
 
 - Nomad templates with `destination = "secrets/..."` and `env = true` populate a file in the allocation’s secrets dir. The driver automatically mounts the allocation’s secrets directory into the VM as read-only via `--dir=secrets:<path>:ro`.
-- Reference: driver/tart_client.go:346-354, examples/example.nomad.hcl:30-39
 
 How to use inside the VM:
 - Locate shared directories (see “Access from Inside the VM”). Your secrets file (e.g. `secrets.env`) will be under the mounted secrets share.
@@ -127,7 +115,7 @@ Reference: driver/networking.go:1-63, driver/config.go:37-52
 
 SSH
 - Connect with the configured `ssh_user` and `ssh_password`.
-- If you need the VM IP, on the host run `tart ip nomad-<ALLOC_ID>` (the driver names VMs `nomad-<allocid>`). Reference: driver/driver.go:229, driver/tart_client.go:301-314
+- If you need the VM IP, on the host run `tart ip nomad-<ALLOC_ID>` (the driver names VMs `nomad-<allocid>`).
 
 Shared directories (including secrets)
 - The driver passes Tart `--dir` flags for each directory mount.
@@ -140,7 +128,6 @@ Root disk options
 
 Logs
 - The driver streams syslog from the VM using `log stream --style syslog --level info`; task logs are visible with `nomad logs`.
-  - Reference: driver/driver.go:288-325
 
 
 ## End-to-End Example
@@ -216,8 +203,5 @@ EOH
 
 ## Notes and Limitations
 
-- Exec via Nomad’s standard `alloc exec` is not supported by this driver; the driver itself uses SSH for internal log streaming and exec calls.
-  - Reference: driver/driver.go:196-222, 242-283
 - Images are cloned on first use; large images take time. Update and progress deadlines in your job’s `update { }` block accordingly.
 - Virtualization.framework on macOS typically limits concurrent VMs per host; consider using constraints in your job to avoid oversubscription (see `examples/example.nomad.hcl`).
-

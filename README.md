@@ -51,6 +51,8 @@ This will create a `nomad-driver-tart` binary in the project root.
 
 ## Configuration
 
+For a complete list of all driver and task configuration options, see docs/configuration.md.
+
 ### Nomad Agent Configuration
 
 Create or modify your Nomad agent configuration to include the Tart driver plugin:
