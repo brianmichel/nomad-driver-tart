@@ -165,25 +165,16 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	handle := drivers.NewTaskHandle(taskHandleVersion)
 	handle.Config = cfg
 
-	allocVMName := d.generateVMName(cfg.AllocID)
-	// Check if the VM already exists before attempting a download
-	vms, err := d.client.List(d.ctx)
+	vmConfig := VMConfig{
+		TaskConfig:  taskConfig,
+		NomadConfig: cfg,
+	}
+
+	needsDownload, err := d.client.NeedsImageDownload(d.ctx, vmConfig)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to list VMs: %v", err)
+		return nil, nil, fmt.Errorf("failed to check image availability: %v", err)
 	}
-
-	vmExists := false
-	for _, vm := range vms {
-		// Tart stores locally downloaded VMs by the URL of the image
-		// see if we have already cloned the image so that we can skip
-		// downloading the image from the registry.
-		if vm.Name == taskConfig.URL {
-			vmExists = true
-			break
-		}
-	}
-
-	if !vmExists {
+	if needsDownload {
 		d.logger.Info("VM image not found locally, downloading", "url", taskConfig.URL)
 		d.eventer.EmitEvent(&drivers.TaskEvent{
 			TaskID:    cfg.ID,
@@ -197,16 +188,11 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		})
 	}
 
-	vmConfig := VMConfig{
-		TaskConfig:  taskConfig,
-		NomadConfig: cfg,
-	}
-
 	if _, err := d.client.Setup(d.ctx, vmConfig); err != nil {
 		return nil, nil, fmt.Errorf("failed to setup VM: %v", err)
 	}
 
-	if !vmExists {
+	if needsDownload {
 		d.eventer.EmitEvent(&drivers.TaskEvent{
 			TaskID:    cfg.ID,
 			TaskName:  cfg.Name,
@@ -231,25 +217,11 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		return nil, nil, fmt.Errorf("failed to create executor: %v", err)
 	}
 
-	args := []string{"run", allocVMName}
-	if !taskConfig.ShowUI {
-		args = append(args, "--no-graphics")
-	}
-
-	// Add secrets dir as read-only mount
-	args = append(args, fmt.Sprintf("--dir=%s:ro", cfg.TaskDir().SecretsDir))
-
-	// Apply networking options per task config
-	netArgs, err := buildTartNetworkArgs(taskConfig.Network)
-	rootDiskArgs, err := buildRootDiskArgs(taskConfig.RootDisk)
-
+	args, err := d.client.BuildStartArgs(vmConfig)
 	if err != nil {
 		pluginClient.Kill()
 		return nil, nil, err
 	}
-
-	args = append(args, netArgs...)
-	args = append(args, rootDiskArgs...)
 
 	execCmd := &executor.ExecCommand{
 		Cmd:              "tart",
