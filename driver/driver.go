@@ -241,11 +241,15 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 
 	// Apply networking options per task config
 	netArgs, err := buildTartNetworkArgs(taskConfig.Network)
+	rootDiskArgs, err := buildRootDiskArgs(taskConfig.RootDisk)
+
 	if err != nil {
 		pluginClient.Kill()
 		return nil, nil, err
 	}
+
 	args = append(args, netArgs...)
+	args = append(args, rootDiskArgs...)
 
 	execCmd := &executor.ExecCommand{
 		Cmd:              "tart",

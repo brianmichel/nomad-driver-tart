@@ -44,13 +44,20 @@ EOH
         # Whether or not to show the built-in Tart UI for the VM
         # Defaults to false
         show_ui = true
-        # Networking options (mutually exclusive)
+        # (optional) Networking options (mutually exclusive)
         # Default: shared/NAT (no option required)
         # network {
         #   mode = "bridged"           # or "host" | "softnet"
         #   bridged_interface = "en0"  # or "Wi-Fi" when mode = "bridged"
         #   softnet_allow = ["192.168.0.0/24"]
         #   softnet_expose = ["2222:22", "8080:80"]
+        # }
+        #
+        # (optional) Root Disk options
+        # root_disk {
+        #   readonly = true            # or true
+        #   caching_mode = "automatic" # (optional), or "uncached" | "cached"
+        #   sync_mode = "full"         # (optional), or "fsync" | "none"
         # }
       }
 
