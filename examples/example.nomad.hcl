@@ -54,11 +54,11 @@ EOH
         # }
         #
         # (optional) Root Disk options
-        root_disk {
-          readonly = true            # or true
-          caching_mode = "automatic" # (optional), or "uncached" | "cached"
-          sync_mode = "full"         # (optional), or "fsync" | "none"
-        }
+        # root_disk {
+        #   readonly = true            # or true
+        #   caching_mode = "automatic" # (optional), or "uncached" | "cached"
+        #   sync_mode = "full"         # (optional), or "fsync" | "none"
+        # }
       }
 
       resources {
