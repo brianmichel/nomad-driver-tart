@@ -366,7 +366,9 @@ func (c *TartClient) BuildStartArgs(config VMConfig) ([]string, error) {
 	if config.NomadConfig != nil {
 		td := config.NomadConfig.TaskDir()
 		if td != nil && td.SecretsDir != "" {
-			args = append(args, fmt.Sprintf("--dir=%s:ro", td.SecretsDir))
+			// Ensure that the secrets directory is mounted with a name to ensure
+			// multiple directories can be mounted if needed.
+			args = append(args, fmt.Sprintf("--dir=secrets:%s:ro", td.SecretsDir))
 		}
 	}
 
@@ -380,8 +382,14 @@ func (c *TartClient) BuildStartArgs(config VMConfig) ([]string, error) {
 		return nil, err
 	}
 
+	dirArgs, err := buildDirectoryArgs(config.TaskConfig.Directories)
+	if err != nil {
+		return nil, err
+	}
+
 	args = append(args, netArgs...)
 	args = append(args, rootDiskArgs...)
+	args = append(args, dirArgs...)
 
 	return args, nil
 }

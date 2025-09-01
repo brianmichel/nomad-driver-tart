@@ -24,6 +24,9 @@ type TaskConfig struct {
 
 	// Root disk options on how to configure the VM
 	RootDisk *RootDiskOptions `codec:"root_disk"`
+
+	// Directories is a blocklist of host directories to mount into the VM
+	Directories []DirectoryMount `codec:"directory"`
 }
 
 type Auth struct {
@@ -74,6 +77,15 @@ var (
 			"caching_mode": hclspec.NewAttr("caching_mode", "string", false),
 			"sync_mode":    hclspec.NewAttr("sync_mode", "string", false),
 		})),
+
+		"directory": hclspec.NewBlockList("directory", hclspec.NewObject(map[string]*hclspec.Spec{
+			"name": hclspec.NewAttr("name", "string", true),
+			"path": hclspec.NewAttr("path", "string", true),
+			"options": hclspec.NewBlock("options", false, hclspec.NewObject(map[string]*hclspec.Spec{
+				"readonly": hclspec.NewAttr("readonly", "bool", true),
+				"tag":      hclspec.NewAttr("tag", "string", false),
+			})),
+		})),
 	})
 )
 
@@ -95,4 +107,21 @@ type RootDiskOptions struct {
 	ReadOnly    bool    `codec:"readonly"`
 	SyncMode    *string `codec:"sync_mode"`
 	CachingMode *string `codec:"caching_mode"`
+}
+
+// DirectoryMount represents a single directory block item from the config
+// with an optional name (purely descriptive), required host path, and
+// optional options.
+type DirectoryMount struct {
+	Name    string            `codec:"name"`
+	Path    string            `codec:"path"`
+	Options *DirectoryOptions `codec:"options"`
+}
+
+// DirectoryOptions controls how a directory mount is handled by tart.
+// - readonly: when true, append ":ro" to the mount spec
+// - tag: when set, append "@tag" to the mount spec
+type DirectoryOptions struct {
+	ReadOnly bool   `codec:"readonly"`
+	Tag      string `codec:"tag"`
 }
