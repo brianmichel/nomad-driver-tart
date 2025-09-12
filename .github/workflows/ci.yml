@@ -20,7 +20,7 @@ jobs:
       - name: Run gofmt
         run: gofmt -w $(git ls-files '*.go')
       - name: Run go vet
-        run: go vet ./... -v
+        run: go vet ./...
       - name: Run go test
         run: go test ./... -v
       - name: Build darwin arm64 binary
