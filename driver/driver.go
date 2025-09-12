@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/go-hclog"
+	"github.com/hashicorp/nomad/client/lib/cpustats"
 	"github.com/hashicorp/nomad/drivers/shared/eventer"
 	"github.com/hashicorp/nomad/drivers/shared/executor"
 	"github.com/hashicorp/nomad/plugins/base"
@@ -74,6 +75,9 @@ type Driver struct {
 
 	// client is the interface for interacting with virtual machines
 	client VirtualizationClient
+
+	// compute is the cpu topology information used for stats aggregation
+	compute cpustats.Compute
 }
 
 // TaskState is the state which is encoded in the handle returned in
@@ -127,6 +131,7 @@ func (d *Driver) SetConfig(cfg *base.Config) error {
 	d.config = &config
 	if cfg.AgentConfig != nil {
 		d.nomadConfig = cfg.AgentConfig.Driver
+		d.compute = cfg.AgentConfig.Compute()
 	}
 
 	return nil
@@ -406,7 +411,49 @@ func (d *Driver) TaskStats(ctx context.Context, taskID string, interval time.Dur
 	if !ok {
 		return nil, drivers.ErrTaskNotFound
 	}
-	return h.exec.Stats(ctx, interval)
+
+	execCh, err := h.exec.Stats(ctx, interval)
+	if err != nil {
+		return nil, err
+	}
+
+	outCh := make(chan *drivers.TaskResourceUsage)
+	var taskCfg TaskConfig
+	if err := h.taskConfig.DecodeDriverConfig(&taskCfg); err != nil {
+		taskCfg = TaskConfig{}
+	}
+	vmConfig := VMConfig{
+		TaskConfig:  taskCfg,
+		NomadConfig: h.taskConfig,
+	}
+
+	go func() {
+		defer close(outCh)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case stats, ok := <-execCh:
+				if !ok {
+					return
+				}
+
+				gUsage, err := guestStats(ctx, d.client, vmConfig)
+				if err == nil && gUsage != nil {
+					stats.ResourceUsage.CpuStats.Percent += gUsage.CpuStats.Percent
+					stats.ResourceUsage.MemoryStats.RSS += gUsage.MemoryStats.RSS
+				}
+
+				select {
+				case outCh <- stats:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+	}()
+
+	return outCh, nil
 }
 
 // TaskEvents returns a channel that the plugin can use to emit task related events.
