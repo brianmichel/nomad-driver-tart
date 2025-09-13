@@ -1,7 +1,0 @@
-{
-    "makefile.configureOnOpen": false,
-    "go.goroot": "/Users/brianmichel/.local/share/mise/installs/go/1.24.4",
-    "go.alternateTools": {
-        "go": "/Users/brianmichel/.local/share/mise/shims/go"
-    }
-}
