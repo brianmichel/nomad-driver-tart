@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -14,6 +15,10 @@ import (
 	"github.com/hashicorp/go-hclog"
 	"golang.org/x/crypto/ssh"
 )
+
+// execCommandContext is a package-level indirection to allow tests to stub
+// out command execution. In er it points to exec.CommandContext.
+var execCommandContext = exec.CommandContext
 
 // TartClient is a wrapper around the tart CLI that implements the Virtualizer interface
 type TartClient struct {
@@ -58,14 +63,24 @@ func (c *TartClient) Available(ctx context.Context) (string, error) {
 
 // SetupVM creates a new Tart VM from a URL
 func (c *TartClient) Setup(ctx context.Context, config VMConfig) (string, error) {
-	// Login to the container registry if authentication is provided
+	// Prepare environment for tart commands. Include task-specific
+	// variables so auth credentials are available during
+	// image pulls.
+	env := os.Environ()
+	if config.NomadConfig != nil {
+		env = append(env, config.NomadConfig.EnvList()...)
+	}
+
+	// Prefer credentials from task config; otherwise rely on env variables.
+	// Always pass through the environment to tart commands.
 	if config.TaskConfig.Auth.IsValid() {
 		host, err := registryHost(config.TaskConfig.URL)
 		if err != nil {
 			return "", fmt.Errorf("failed to parse URL: %v", err)
 		}
-		loginCmd := exec.CommandContext(ctx, "tart", "login", host, "--username", config.TaskConfig.Auth.Username, "--password-stdin")
+		loginCmd := execCommandContext(ctx, "tart", "login", host, "--username", config.TaskConfig.Auth.Username, "--password-stdin")
 		loginCmd.Stdin = strings.NewReader(config.TaskConfig.Auth.Password)
+		loginCmd.Env = env
 
 		var stderr bytes.Buffer
 		loginCmd.Stderr = &stderr
@@ -73,13 +88,16 @@ func (c *TartClient) Setup(ctx context.Context, config VMConfig) (string, error)
 		if err := loginCmd.Run(); err != nil {
 			return "", fmt.Errorf("failed to login to container registry: %v (stderr: %s)", err, stderr.String())
 		}
+	} else {
+		c.logger.Trace("Auth not provided; relying on env vars for registry access")
 	}
 
 	vmName := c.generateVMName(config.NomadConfig.AllocID)
 	url := config.TaskConfig.URL
 
 	c.logger.Trace("Setting up Tart VM", "name", vmName, "url", url)
-	cmd := exec.CommandContext(ctx, "tart", "clone", url, vmName)
+	cmd := execCommandContext(ctx, "tart", "clone", url, vmName)
+	cmd.Env = env
 
 	// Configure VM resources before starting it using the Nomad resources block
 	var cpuCores int = 4    // Default to 4 cores
@@ -115,7 +133,7 @@ func (c *TartClient) Start(ctx context.Context, vmName string, headless bool) (i
 	}
 
 	c.logger.Trace("Starting Tart VM", "name", vmName, "headless", headless)
-	cmd := exec.CommandContext(ctx, "tart", args...)
+	cmd := execCommandContext(ctx, "tart", args...)
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -336,7 +354,7 @@ func (c *TartClient) SetVMResources(ctx context.Context, vmName string, cpu, mem
 	}
 
 	c.logger.Trace("Setting VM resources", "name", vmName, "args", args)
-	cmd := exec.CommandContext(ctx, "tart", args...)
+	cmd := execCommandContext(ctx, "tart", args...)
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr

@@ -22,7 +22,7 @@ jobs:
       - name: Run go vet
         run: go vet ./...
       - name: Run go test
-        run: go test ./...
+        run: go test ./... -v
       - name: Build darwin arm64 binary
         env:
           GOOS: darwin
