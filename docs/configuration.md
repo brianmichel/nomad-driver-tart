@@ -40,6 +40,11 @@ The following parameters go under the task’s driver config block `task { drive
 
 - `show_ui` (bool, optional, default: `false`): Show Tart’s built-in UI window; when `false` runs headless (`--no-graphics`).
 
+- `display { width, height }` (block, optional): Requested display resolution when the Tart UI is shown.
+  - `width` (number, required): Desired pixel width. Values are clamped to 800–1920.
+  - `height` (number, required): Desired pixel height. Values are clamped to 600–1080.
+  - Applied via `tart set --display <width>x<height>` during setup. Both dimensions must be provided if the block is present.
+
 - `disk_size` (number, optional): Desired VM disk size in gigabytes. `0` leaves disk unchanged.
   - Applied via `tart set --disk-size` during setup.
 

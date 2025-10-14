@@ -44,6 +44,12 @@ EOH
         # Whether or not to show the built-in Tart UI for the VM
         # Defaults to false
         show_ui = true
+        # (optional) Display resolution when UI is shown.
+        # Width is clamped to 800-1920 and height to 600-1080.
+        # display {
+        #   width  = 1280
+        #   height = 720
+        # }
         # (optional) Networking options (mutually exclusive)
         # Default: shared/NAT (no option required)
         # network {

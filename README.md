@@ -115,6 +115,12 @@ EOH
         # Whether or not to show the built-in Tart UI for the VM
         # Defaults to false
         show_ui      = true
+        # Optional display resolution when UI is visible (width clamped to 800-1920,
+        # height clamped to 600-1080).
+        # display {
+        #   width  = 1280
+        #   height = 720
+        # }
         # Optional resource configuration for the VM
         # disk_size is the desired disk size in gigabytes
         disk_size  = 60
