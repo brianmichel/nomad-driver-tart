@@ -118,7 +118,7 @@ func (c *TartClient) Setup(ctx context.Context, config VMConfig) (string, error)
 			vmName, url, err, stderr.String())
 	}
 
-	if err := c.SetVMResources(ctx, vmName, cpuCores, memoryMB, diskGB); err != nil {
+	if err := c.SetVMResources(ctx, vmName, cpuCores, memoryMB, diskGB, config.TaskConfig.Display); err != nil {
 		return "", fmt.Errorf("failed to set VM resources: %v", err)
 	}
 
@@ -336,8 +336,8 @@ func (c *TartClient) Exec(ctx context.Context, config VMConfig, opts ExecOptions
 	return 0, nil
 }
 
-// SetVMResources modifies CPU cores, memory (MB), and disk size (GB) for a VM.
-func (c *TartClient) SetVMResources(ctx context.Context, vmName string, cpu, memoryMB, diskGB int) error {
+// SetVMResources modifies CPU cores, memory (MB), disk size (GB), and display resolution for a VM.
+func (c *TartClient) SetVMResources(ctx context.Context, vmName string, cpu, memoryMB, diskGB int, display *DisplayConfig) error {
 	args := []string{"set", vmName}
 	if cpu > 0 {
 		args = append(args, "--cpu", fmt.Sprintf("%d", cpu))
@@ -347,6 +347,15 @@ func (c *TartClient) SetVMResources(ctx context.Context, vmName string, cpu, mem
 	}
 	if diskGB > 0 {
 		args = append(args, "--disk-size", fmt.Sprintf("%d", diskGB))
+	}
+	if display != nil {
+		res, err := formatDisplayResolution(display)
+		if err != nil {
+			return err
+		}
+		if res != "" {
+			args = append(args, "--display", res)
+		}
 	}
 
 	if len(args) == 2 {

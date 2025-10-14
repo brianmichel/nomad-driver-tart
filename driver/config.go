@@ -25,6 +25,9 @@ type TaskConfig struct {
 	// Root disk options on how to configure the VM
 	RootDisk *RootDiskOptions `codec:"root_disk"`
 
+	// Display contains resolution settings for the VM UI
+	Display *DisplayConfig `codec:"display"`
+
 	// Directories is a blocklist of host directories to mount into the VM
 	Directories []DirectoryMount `codec:"directory"`
 }
@@ -78,6 +81,11 @@ var (
 			"sync_mode":    hclspec.NewAttr("sync_mode", "string", false),
 		})),
 
+		"display": hclspec.NewBlock("display", false, hclspec.NewObject(map[string]*hclspec.Spec{
+			"width":  hclspec.NewAttr("width", "number", true),
+			"height": hclspec.NewAttr("height", "number", true),
+		})),
+
 		"directory": hclspec.NewBlockList("directory", hclspec.NewObject(map[string]*hclspec.Spec{
 			"name": hclspec.NewAttr("name", "string", true),
 			"path": hclspec.NewAttr("path", "string", true),
@@ -124,4 +132,10 @@ type DirectoryMount struct {
 type DirectoryOptions struct {
 	ReadOnly bool   `codec:"readonly"`
 	Tag      string `codec:"tag"`
+}
+
+// DisplayConfig controls the UI resolution of the VM.
+type DisplayConfig struct {
+	Width  int `codec:"width"`
+	Height int `codec:"height"`
 }
