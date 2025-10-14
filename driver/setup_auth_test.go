@@ -222,6 +222,7 @@ func TestSetup_SetsDisplayResolution(t *testing.T) {
 	vmc := VMConfig{
 		TaskConfig: TaskConfig{
 			URL:     "ghcr.io/example/display:latest",
+			ShowUI:  true,
 			Display: &DisplayConfig{Width: 640, Height: 2000},
 		},
 		NomadConfig: &drivers.TaskConfig{AllocID: "alloc-disp"},
@@ -254,17 +255,81 @@ func TestSetup_SetsDisplayResolution(t *testing.T) {
 	}
 
 	foundDisplay := false
-	for i := 0; i < len(setRec.Args)-1; i++ {
-		if setRec.Args[i] == "--display" {
+	foundNoRefit := false
+	for i := 0; i < len(setRec.Args); i++ {
+		switch setRec.Args[i] {
+		case "--display":
 			foundDisplay = true
+			if i+1 >= len(setRec.Args) {
+				t.Fatalf("--display flag missing value: %v", setRec.Args)
+			}
 			if got, want := setRec.Args[i+1], "800x1080"; got != want {
 				t.Fatalf("display resolution mismatch; got %s want %s", got, want)
 			}
-			break
+		case "--no-display-refit":
+			foundNoRefit = true
 		}
 	}
 	if !foundDisplay {
 		t.Fatalf("--display flag not found in set invocation: %v", setRec.Args)
+	}
+	if !foundNoRefit {
+		t.Fatalf("--no-display-refit flag not found in set invocation: %v", setRec.Args)
+	}
+}
+
+func TestSetup_HeadlessOmitsDisplayRefit(t *testing.T) {
+	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
+
+	tmp := t.TempDir()
+	logPath := filepath.Join(tmp, "cmd.log")
+	t.Setenv("CMD_LOG", logPath)
+
+	orig := execCommandContext
+	execCommandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		ha := append([]string{"-test.run=TestHelperProcess", "--", name}, args...)
+		return exec.CommandContext(ctx, os.Args[0], ha...)
+	}
+	defer func() { execCommandContext = orig }()
+
+	vmc := VMConfig{
+		TaskConfig: TaskConfig{
+			URL: "ghcr.io/example/headless:latest",
+			// show_ui defaults to false
+		},
+		NomadConfig: &drivers.TaskConfig{AllocID: "alloc-headless"},
+	}
+
+	c := NewTartClient(testLogger(t))
+	if _, err := c.Setup(context.Background(), vmc); err != nil {
+		t.Fatalf("Setup returned error: %v", err)
+	}
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("reading log: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	var setRec *cmdRecord
+	for _, ln := range lines {
+		var r cmdRecord
+		if err := json.Unmarshal([]byte(ln), &r); err != nil {
+			t.Fatalf("parse record: %v", err)
+		}
+		if r.Name == "tart" && len(r.Args) > 0 && r.Args[0] == "set" {
+			rr := r
+			setRec = &rr
+			break
+		}
+	}
+	if setRec == nil {
+		t.Fatalf("expected a set invocation, none found")
+	}
+
+	for _, arg := range setRec.Args {
+		if arg == "--no-display-refit" {
+			t.Fatalf("unexpected --no-display-refit flag in headless setup: %v", setRec.Args)
+		}
 	}
 }
 
