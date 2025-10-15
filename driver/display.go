@@ -4,9 +4,9 @@ import "fmt"
 
 const (
 	minDisplayWidth  = 800
-	maxDisplayWidth  = 1920
+	maxDisplayWidth  = 3840
 	minDisplayHeight = 600
-	maxDisplayHeight = 1080
+	maxDisplayHeight = 2160
 )
 
 func formatDisplayResolution(cfg *DisplayConfig) (string, error) {
