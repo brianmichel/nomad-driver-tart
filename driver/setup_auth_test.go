@@ -223,7 +223,7 @@ func TestSetup_SetsDisplayResolution(t *testing.T) {
 		TaskConfig: TaskConfig{
 			URL:     "ghcr.io/example/display:latest",
 			ShowUI:  true,
-			Display: &DisplayConfig{Width: 640, Height: 2000},
+			Display: &DisplayConfig{Width: 640, Height: 5000},
 		},
 		NomadConfig: &drivers.TaskConfig{AllocID: "alloc-disp"},
 	}
@@ -263,7 +263,7 @@ func TestSetup_SetsDisplayResolution(t *testing.T) {
 			if i+1 >= len(setRec.Args) {
 				t.Fatalf("--display flag missing value: %v", setRec.Args)
 			}
-			if got, want := setRec.Args[i+1], "800x1080"; got != want {
+			if got, want := setRec.Args[i+1], "800x2160"; got != want {
 				t.Fatalf("display resolution mismatch; got %s want %s", got, want)
 			}
 		case "--no-display-refit":
