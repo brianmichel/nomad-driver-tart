@@ -24,12 +24,12 @@ func TestFormatDisplayResolution_WithinBounds(t *testing.T) {
 }
 
 func TestFormatDisplayResolution_ClampBounds(t *testing.T) {
-	cfg := &DisplayConfig{Width: 2560, Height: 1440}
+	cfg := &DisplayConfig{Width: 3900, Height: 3000}
 	res, err := formatDisplayResolution(cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if want := "1920x1080"; res != want {
+	if want := "3840x2160"; res != want {
 		t.Fatalf("got %s, want %s", res, want)
 	}
 }
