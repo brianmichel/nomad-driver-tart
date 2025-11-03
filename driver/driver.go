@@ -339,18 +339,14 @@ func (d *Driver) StopTask(taskID string, timeout time.Duration, signal string) e
 		return drivers.ErrTaskNotFound
 	}
 
-	allocVMName := d.generateVMName(handle.taskConfig.AllocID)
-
-	// Attempt to gracefully stop the VM via the virtualizer
-	var taskConfig TaskConfig
-	if err := handle.taskConfig.DecodeDriverConfig(&taskConfig); err == nil {
+	var allocVMName string
+	if handle.taskConfig != nil {
+		allocVMName = d.generateVMName(handle.taskConfig.AllocID)
 		if err := d.client.Stop(d.ctx, allocVMName, timeout); err != nil {
-			d.logger.Warn("failed to stop VM via virtualizer", "error", err)
+			d.logger.Warn("failed to stop VM via virtualizer", "task_id", taskID, "error", err)
 		}
-
-		if err := d.client.Delete(d.ctx, allocVMName); err != nil {
-			d.logger.Warn("failed to delete VM via virtualizer", "error", err)
-		}
+	} else {
+		d.logger.Warn("task config missing while stopping task", "task_id", taskID)
 	}
 
 	if err := handle.exec.Shutdown(signal, timeout); err != nil {
@@ -361,7 +357,18 @@ func (d *Driver) StopTask(taskID string, timeout time.Duration, signal string) e
 	}
 
 	<-handle.doneCh
-	handle.pluginClient.Kill()
+
+	if handle.pluginClient != nil {
+		handle.pluginClient.Kill()
+	} else {
+		handle.logger.Warn("plugin client missing while stopping task")
+	}
+
+	if allocVMName != "" {
+		if err := d.client.Delete(d.ctx, allocVMName); err != nil {
+			d.logger.Warn("failed to delete VM via virtualizer", "task_id", taskID, "error", err)
+		}
+	}
 
 	d.logger.Info("stopped tart task", "task_id", taskID)
 	return nil
@@ -378,11 +385,24 @@ func (d *Driver) DestroyTask(taskID string, force bool) error {
 		return fmt.Errorf("cannot destroy running task")
 	}
 
-	if !handle.pluginClient.Exited() {
-		if err := handle.exec.Shutdown("", 0); err != nil {
-			handle.logger.Error("destroying executor failed", "error", err)
+	if handle.pluginClient != nil && !handle.pluginClient.Exited() {
+		if handle.exec != nil {
+			if err := handle.exec.Shutdown("", 0); err != nil {
+				handle.logger.Error("destroying executor failed", "error", err)
+			}
+		} else {
+			handle.logger.Warn("executor missing while destroying task")
 		}
 		handle.pluginClient.Kill()
+	}
+
+	if handle.taskConfig != nil {
+		allocVMName := d.generateVMName(handle.taskConfig.AllocID)
+		if err := d.client.Delete(d.ctx, allocVMName); err != nil {
+			d.logger.Warn("failed to delete VM via virtualizer", "task_id", taskID, "error", err)
+		}
+	} else {
+		d.logger.Warn("task config missing while destroying task", "task_id", taskID)
 	}
 
 	d.tasks.Delete(taskID)
