@@ -19,11 +19,12 @@ type TaskConfig struct {
 	DiskSize int  `codec:"disk_size"`
 	Auth     Auth `codec:"auth"`
 
-	// Prewarm, when true, turns the task into a short-lived image prefetch:
+	// PullOnly, when true, turns the task into a short-lived image prefetch:
 	// the driver runs `tart pull <url>` on the client to populate the local
 	// OCI cache and then exits. No VM is created, started, or deleted.
-	// Typically scheduled as a sysbatch job with a client constraint.
-	Prewarm bool `codec:"prewarm"`
+	// Typically scheduled as a sysbatch job with a client constraint to
+	// pre-warm a fleet of Nomad clients.
+	PullOnly bool `codec:"pull_only"`
 
 	// Network contains networking options for the VM
 	Network *NetworkConfig `codec:"network"`
@@ -59,13 +60,13 @@ var (
 	taskConfigSpec = hclspec.NewObject(map[string]*hclspec.Spec{
 		"url": hclspec.NewAttr("url", "string", true),
 		// ssh_user / ssh_password are required for normal (VM-running) tasks
-		// but not for prewarm-only tasks; this is enforced in the driver at
+		// but not for pull_only tasks; this is enforced in the driver at
 		// StartTask time rather than by the schema.
 		"ssh_user":     hclspec.NewAttr("ssh_user", "string", false),
 		"ssh_password": hclspec.NewAttr("ssh_password", "string", false),
 		"show_ui":      hclspec.NewDefault(hclspec.NewAttr("show_ui", "bool", false), hclspec.NewLiteral("false")),
 		"disk_size":    hclspec.NewAttr("disk_size", "number", false),
-		"prewarm":      hclspec.NewDefault(hclspec.NewAttr("prewarm", "bool", false), hclspec.NewLiteral("false")),
+		"pull_only":    hclspec.NewDefault(hclspec.NewAttr("pull_only", "bool", false), hclspec.NewLiteral("false")),
 		"auth": hclspec.NewBlock("auth", false, hclspec.NewObject(map[string]*hclspec.Spec{
 			"username": hclspec.NewAttr("username", "string", true),
 			"password": hclspec.NewAttr("password", "string", true),

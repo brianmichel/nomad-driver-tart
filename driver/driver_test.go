@@ -44,7 +44,7 @@ func (m *mockVirtualizer) NeedsImageDownload(context.Context, VMConfig) (bool, e
 func (m *mockVirtualizer) PrepareRegistryEnv(context.Context, VMConfig) ([]string, error) {
 	return nil, nil
 }
-func (m *mockVirtualizer) BuildPrewarmArgs(VMConfig) []string { return nil }
+func (m *mockVirtualizer) BuildPullArgs(VMConfig) []string { return nil }
 
 type stubExecutor struct {
 	shutdownCalled bool
@@ -120,7 +120,7 @@ func TestStopTaskDeletesVM(t *testing.T) {
 	}
 }
 
-func TestStopTaskPrewarmSkipsVMOps(t *testing.T) {
+func TestStopTaskPullOnlySkipsVMOps(t *testing.T) {
 	logger := hclog.NewNullLogger()
 	drv := NewTartDriver(logger).(*Driver)
 
@@ -131,58 +131,58 @@ func TestStopTaskPrewarmSkipsVMOps(t *testing.T) {
 	doneCh := make(chan struct{})
 	close(doneCh)
 
-	taskID := "task-prewarm-stop"
+	taskID := "task-pull-only-stop"
 	drv.tasks.Set(taskID, &taskHandle{
 		taskConfig: &drivers.TaskConfig{
 			ID:      taskID,
-			Name:    "test-prewarm-stop",
-			AllocID: "alloc-prewarm-stop",
+			Name:    "test-pull-only-stop",
+			AllocID: "alloc-pull-only-stop",
 		},
-		state:   drivers.TaskStateRunning,
-		exec:    exec,
-		doneCh:  doneCh,
-		logger:  drv.logger,
-		prewarm: true,
+		state:    drivers.TaskStateRunning,
+		exec:     exec,
+		doneCh:   doneCh,
+		logger:   drv.logger,
+		pullOnly: true,
 	})
 
 	if err := drv.StopTask(taskID, time.Second, "SIGINT"); err != nil {
 		t.Fatalf("StopTask returned error: %v", err)
 	}
 	if mock.stopCalled {
-		t.Fatal("expected virtualizer Stop to NOT be called for a prewarm task")
+		t.Fatal("expected virtualizer Stop to NOT be called for a pull_only task")
 	}
 	if mock.deleteCalled {
-		t.Fatal("expected virtualizer Delete to NOT be called for a prewarm task")
+		t.Fatal("expected virtualizer Delete to NOT be called for a pull_only task")
 	}
 	if !exec.shutdownCalled {
-		t.Fatal("expected executor Shutdown to still be called for a prewarm task")
+		t.Fatal("expected executor Shutdown to still be called for a pull_only task")
 	}
 }
 
-func TestDestroyTaskPrewarmSkipsDelete(t *testing.T) {
+func TestDestroyTaskPullOnlySkipsDelete(t *testing.T) {
 	logger := hclog.NewNullLogger()
 	drv := NewTartDriver(logger).(*Driver)
 
 	mock := &mockVirtualizer{}
 	drv.client = mock
 
-	taskID := "task-prewarm-destroy"
+	taskID := "task-pull-only-destroy"
 	drv.tasks.Set(taskID, &taskHandle{
 		taskConfig: &drivers.TaskConfig{
 			ID:      taskID,
-			Name:    "test-prewarm-destroy",
-			AllocID: "alloc-prewarm-destroy",
+			Name:    "test-pull-only-destroy",
+			AllocID: "alloc-pull-only-destroy",
 		},
-		state:   drivers.TaskStateExited,
-		logger:  drv.logger,
-		prewarm: true,
+		state:    drivers.TaskStateExited,
+		logger:   drv.logger,
+		pullOnly: true,
 	})
 
 	if err := drv.DestroyTask(taskID, false); err != nil {
 		t.Fatalf("DestroyTask returned error: %v", err)
 	}
 	if mock.deleteCalled {
-		t.Fatal("expected virtualizer Delete to NOT be called for a prewarm task")
+		t.Fatal("expected virtualizer Delete to NOT be called for a pull_only task")
 	}
 	if _, ok := drv.tasks.Get(taskID); ok {
 		t.Fatalf("expected task %q to be removed from store", taskID)

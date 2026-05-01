@@ -6,13 +6,13 @@ import (
 	"github.com/hashicorp/go-hclog"
 )
 
-func TestBuildPrewarmArgs(t *testing.T) {
+func TestBuildPullArgs(t *testing.T) {
 	c := NewTartClient(hclog.NewNullLogger())
 	url := "ghcr.io/cirruslabs/macos-sequoia-base:latest"
-	args := c.BuildPrewarmArgs(VMConfig{TaskConfig: TaskConfig{URL: url}})
+	args := c.BuildPullArgs(VMConfig{TaskConfig: TaskConfig{URL: url}})
 
 	if len(args) != 2 || args[0] != "pull" || args[1] != url {
-		t.Fatalf("unexpected prewarm args: %v", args)
+		t.Fatalf("unexpected pull args: %v", args)
 	}
 }
 

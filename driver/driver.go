@@ -84,7 +84,7 @@ type TaskState struct {
 	StartedAt   time.Time
 	CompletedAt time.Time
 	ExitResult  *drivers.ExitResult
-	Prewarm     bool
+	PullOnly    bool
 }
 
 // NewTartDriver returns a new driver plugin implementation
@@ -171,12 +171,12 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		NomadConfig: cfg,
 	}
 
-	if taskConfig.Prewarm {
-		return d.startPrewarmTask(cfg, vmConfig, handle)
+	if taskConfig.PullOnly {
+		return d.startPullOnlyTask(cfg, vmConfig, handle)
 	}
 
 	if taskConfig.SSHUser == "" || taskConfig.SSHPassword == "" {
-		return nil, nil, fmt.Errorf("ssh_user and ssh_password are required unless prewarm = true")
+		return nil, nil, fmt.Errorf("ssh_user and ssh_password are required unless pull_only = true")
 	}
 
 	needsDownload, err := d.client.NeedsImageDownload(d.ctx, vmConfig)
@@ -304,11 +304,11 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	return handle, nil, nil
 }
 
-// startPrewarmTask runs `tart pull <url>` via the executor so that the image
+// startPullOnlyTask runs `tart pull <url>` via the executor so that the image
 // is cached locally on the Nomad client. No VM is created; the task
 // completes as soon as the pull exits.
-func (d *Driver) startPrewarmTask(cfg *drivers.TaskConfig, vmConfig VMConfig, handle *drivers.TaskHandle) (*drivers.TaskHandle, *drivers.DriverNetwork, error) {
-	d.logger.Info("starting tart prewarm task", "url", vmConfig.TaskConfig.URL)
+func (d *Driver) startPullOnlyTask(cfg *drivers.TaskConfig, vmConfig VMConfig, handle *drivers.TaskHandle) (*drivers.TaskHandle, *drivers.DriverNetwork, error) {
+	d.logger.Info("starting tart pull-only task", "url", vmConfig.TaskConfig.URL)
 
 	if _, err := d.client.PrepareRegistryEnv(d.ctx, vmConfig); err != nil {
 		return nil, nil, fmt.Errorf("failed to prepare registry env: %v", err)
@@ -319,7 +319,7 @@ func (d *Driver) startPrewarmTask(cfg *drivers.TaskConfig, vmConfig VMConfig, ha
 		TaskName:  cfg.Name,
 		AllocID:   cfg.AllocID,
 		Timestamp: time.Now(),
-		Message:   "Prewarming VM image",
+		Message:   "Pulling VM image",
 		Annotations: map[string]string{
 			"url": vmConfig.TaskConfig.URL,
 		},
@@ -339,7 +339,7 @@ func (d *Driver) startPrewarmTask(cfg *drivers.TaskConfig, vmConfig VMConfig, ha
 
 	execCmd := &executor.ExecCommand{
 		Cmd:              "tart",
-		Args:             d.client.BuildPrewarmArgs(vmConfig),
+		Args:             d.client.BuildPullArgs(vmConfig),
 		Env:              d.TartEnvList(cfg),
 		User:             cfg.User,
 		TaskDir:          cfg.TaskDir().Dir,
@@ -351,13 +351,13 @@ func (d *Driver) startPrewarmTask(cfg *drivers.TaskConfig, vmConfig VMConfig, ha
 	ps, err := execImpl.Launch(execCmd)
 	if err != nil {
 		pluginClient.Kill()
-		return nil, nil, fmt.Errorf("failed to launch prewarm: %v", err)
+		return nil, nil, fmt.Errorf("failed to launch pull: %v", err)
 	}
 
 	state := TaskState{
 		TaskConfig: cfg,
 		StartedAt:  time.Now(),
-		Prewarm:    true,
+		PullOnly:   true,
 	}
 	handle.State = drivers.TaskStateRunning
 	if err := handle.SetDriverState(&state); err != nil {
@@ -375,7 +375,7 @@ func (d *Driver) startPrewarmTask(cfg *drivers.TaskConfig, vmConfig VMConfig, ha
 		startedAt:    time.Now().Round(time.Millisecond),
 		logger:       d.logger,
 		doneCh:       make(chan struct{}),
-		prewarm:      true,
+		pullOnly:     true,
 	}
 
 	d.tasks.Set(cfg.ID, h)
@@ -429,7 +429,7 @@ func (d *Driver) StopTask(taskID string, timeout time.Duration, signal string) e
 	}
 
 	var allocVMName string
-	if handle.taskConfig != nil && !handle.prewarm {
+	if handle.taskConfig != nil && !handle.pullOnly {
 		allocVMName = d.generateVMName(handle.taskConfig.AllocID)
 		if err := d.client.Stop(d.ctx, allocVMName, timeout); err != nil {
 			d.logger.Warn("failed to stop VM via virtualizer", "task_id", taskID, "error", err)
@@ -485,7 +485,7 @@ func (d *Driver) DestroyTask(taskID string, force bool) error {
 		handle.pluginClient.Kill()
 	}
 
-	if handle.taskConfig != nil && !handle.prewarm {
+	if handle.taskConfig != nil && !handle.pullOnly {
 		allocVMName := d.generateVMName(handle.taskConfig.AllocID)
 		if err := d.client.Delete(d.ctx, allocVMName); err != nil {
 			d.logger.Warn("failed to delete VM via virtualizer", "task_id", taskID, "error", err)

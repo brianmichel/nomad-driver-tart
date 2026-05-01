@@ -24,8 +24,8 @@ job "tart-prewarm-macos-sequoia" {
       driver = "tart"
 
       config {
-        url     = "ghcr.io/cirruslabs/macos-sequoia-base:latest"
-        prewarm = true
+        url       = "ghcr.io/cirruslabs/macos-sequoia-base:latest"
+        pull_only = true
 
         // auth is optional; only required for private registries.
         // auth {

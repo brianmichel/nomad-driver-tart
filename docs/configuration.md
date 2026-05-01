@@ -33,12 +33,12 @@ The following parameters go under the task’s driver config block `task { drive
 - `url` (string, required): Tart image reference to clone (e.g. `ghcr.io/cirruslabs/macos-sequoia-base:latest`).
   - Used to `tart clone` the VM before start.
 
-- `ssh_user` (string, required unless `prewarm = true`): Username the driver uses to SSH into the VM for logs/exec.
+- `ssh_user` (string, required unless `pull_only = true`): Username the driver uses to SSH into the VM for logs/exec.
 
-- `ssh_password` (string, required unless `prewarm = true`): Password used for SSH.
+- `ssh_password` (string, required unless `pull_only = true`): Password used for SSH.
   - Tip: inject via Nomad template and var, not hard-coded.
 
-- `prewarm` (bool, optional, default: `false`): When true, the task runs `tart pull <url>` on the client to populate the local image cache and exits — no VM is created, started, or deleted. Typically scheduled as a `sysbatch` job with a client constraint so every selected client pre-fetches the image ahead of real workload tasks. See `examples/prewarm.nomad.hcl`.
+- `pull_only` (bool, optional, default: `false`): When true, the task runs `tart pull <url>` on the client to populate the local image cache and exits — no VM is created, started, or deleted. Typically scheduled as a `sysbatch` job with a client constraint to pre-warm a fleet ahead of real workload tasks. See `examples/prewarm.nomad.hcl`.
 
 - `show_ui` (bool, optional, default: `false`): Show Tart’s built-in UI window; when `false` runs headless (`--no-graphics`).
 

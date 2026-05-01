@@ -95,9 +95,9 @@ func (c *TartClient) PrepareRegistryEnv(ctx context.Context, config VMConfig) ([
 	return env, nil
 }
 
-// BuildPrewarmArgs returns the tart CLI args used to prefetch an image into
+// BuildPullArgs returns the tart CLI args used to prefetch an image into
 // the local OCI cache without creating a named VM.
-func (c *TartClient) BuildPrewarmArgs(config VMConfig) []string {
+func (c *TartClient) BuildPullArgs(config VMConfig) []string {
 	return []string{"pull", config.TaskConfig.URL}
 }
 
