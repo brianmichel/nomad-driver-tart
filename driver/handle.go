@@ -49,6 +49,10 @@ type taskHandle struct {
 
 	// doneCh is closed when the task has finished executing
 	doneCh chan struct{}
+
+	// prewarm indicates this task is a short-lived image prefetch; the
+	// driver must skip VM-lifecycle operations (run/stop/delete) for it.
+	prewarm bool
 }
 
 // TaskStatus returns the current status of the task

@@ -61,35 +61,51 @@ func (c *TartClient) Available(ctx context.Context) (string, error) {
 	return version, nil
 }
 
-// SetupVM creates a new Tart VM from a URL
-func (c *TartClient) Setup(ctx context.Context, config VMConfig) (string, error) {
-	// Prepare environment for tart commands. Include task-specific
-	// variables so auth credentials are available during
-	// image pulls.
+// PrepareRegistryEnv builds the environment slice passed to tart commands
+// and performs a `tart login` against the target registry when task-level
+// auth credentials are configured. The resulting environment is suitable for
+// reuse across subsequent tart invocations (clone, pull, etc.).
+func (c *TartClient) PrepareRegistryEnv(ctx context.Context, config VMConfig) ([]string, error) {
 	env := os.Environ()
 	if config.NomadConfig != nil {
 		env = append(env, config.NomadConfig.EnvList()...)
 	}
 
-	// Prefer credentials from task config; otherwise rely on env variables.
-	// Always pass through the environment to tart commands.
-	if config.TaskConfig.Auth.IsValid() {
-		host, err := registryHost(config.TaskConfig.URL)
-		if err != nil {
-			return "", fmt.Errorf("failed to parse URL: %v", err)
-		}
-		loginCmd := execCommandContext(ctx, "tart", "login", host, "--username", config.TaskConfig.Auth.Username, "--password-stdin")
-		loginCmd.Stdin = strings.NewReader(config.TaskConfig.Auth.Password)
-		loginCmd.Env = env
-
-		var stderr bytes.Buffer
-		loginCmd.Stderr = &stderr
-
-		if err := loginCmd.Run(); err != nil {
-			return "", fmt.Errorf("failed to login to container registry: %v (stderr: %s)", err, stderr.String())
-		}
-	} else {
+	if !config.TaskConfig.Auth.IsValid() {
 		c.logger.Trace("Auth not provided; relying on env vars for registry access")
+		return env, nil
+	}
+
+	host, err := registryHost(config.TaskConfig.URL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse URL: %v", err)
+	}
+
+	loginCmd := execCommandContext(ctx, "tart", "login", host, "--username", config.TaskConfig.Auth.Username, "--password-stdin")
+	loginCmd.Stdin = strings.NewReader(config.TaskConfig.Auth.Password)
+	loginCmd.Env = env
+
+	var stderr bytes.Buffer
+	loginCmd.Stderr = &stderr
+
+	if err := loginCmd.Run(); err != nil {
+		return nil, fmt.Errorf("failed to login to container registry: %v (stderr: %s)", err, stderr.String())
+	}
+
+	return env, nil
+}
+
+// BuildPrewarmArgs returns the tart CLI args used to prefetch an image into
+// the local OCI cache without creating a named VM.
+func (c *TartClient) BuildPrewarmArgs(config VMConfig) []string {
+	return []string{"pull", config.TaskConfig.URL}
+}
+
+// SetupVM creates a new Tart VM from a URL
+func (c *TartClient) Setup(ctx context.Context, config VMConfig) (string, error) {
+	env, err := c.PrepareRegistryEnv(ctx, config)
+	if err != nil {
+		return "", err
 	}
 
 	vmName := c.generateVMName(config.NomadConfig.AllocID)

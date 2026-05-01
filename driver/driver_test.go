@@ -41,6 +41,10 @@ func (m *mockVirtualizer) BuildStartArgs(VMConfig) ([]string, error)            
 func (m *mockVirtualizer) NeedsImageDownload(context.Context, VMConfig) (bool, error) {
 	return false, nil
 }
+func (m *mockVirtualizer) PrepareRegistryEnv(context.Context, VMConfig) ([]string, error) {
+	return nil, nil
+}
+func (m *mockVirtualizer) BuildPrewarmArgs(VMConfig) []string { return nil }
 
 type stubExecutor struct {
 	shutdownCalled bool
@@ -113,6 +117,75 @@ func TestStopTaskDeletesVM(t *testing.T) {
 
 	if !mock.deleteCalled || mock.deleteName != expectedName {
 		t.Fatalf("expected Delete to be called with %q", expectedName)
+	}
+}
+
+func TestStopTaskPrewarmSkipsVMOps(t *testing.T) {
+	logger := hclog.NewNullLogger()
+	drv := NewTartDriver(logger).(*Driver)
+
+	mock := &mockVirtualizer{}
+	drv.client = mock
+
+	exec := &stubExecutor{}
+	doneCh := make(chan struct{})
+	close(doneCh)
+
+	taskID := "task-prewarm-stop"
+	drv.tasks.Set(taskID, &taskHandle{
+		taskConfig: &drivers.TaskConfig{
+			ID:      taskID,
+			Name:    "test-prewarm-stop",
+			AllocID: "alloc-prewarm-stop",
+		},
+		state:   drivers.TaskStateRunning,
+		exec:    exec,
+		doneCh:  doneCh,
+		logger:  drv.logger,
+		prewarm: true,
+	})
+
+	if err := drv.StopTask(taskID, time.Second, "SIGINT"); err != nil {
+		t.Fatalf("StopTask returned error: %v", err)
+	}
+	if mock.stopCalled {
+		t.Fatal("expected virtualizer Stop to NOT be called for a prewarm task")
+	}
+	if mock.deleteCalled {
+		t.Fatal("expected virtualizer Delete to NOT be called for a prewarm task")
+	}
+	if !exec.shutdownCalled {
+		t.Fatal("expected executor Shutdown to still be called for a prewarm task")
+	}
+}
+
+func TestDestroyTaskPrewarmSkipsDelete(t *testing.T) {
+	logger := hclog.NewNullLogger()
+	drv := NewTartDriver(logger).(*Driver)
+
+	mock := &mockVirtualizer{}
+	drv.client = mock
+
+	taskID := "task-prewarm-destroy"
+	drv.tasks.Set(taskID, &taskHandle{
+		taskConfig: &drivers.TaskConfig{
+			ID:      taskID,
+			Name:    "test-prewarm-destroy",
+			AllocID: "alloc-prewarm-destroy",
+		},
+		state:   drivers.TaskStateExited,
+		logger:  drv.logger,
+		prewarm: true,
+	})
+
+	if err := drv.DestroyTask(taskID, false); err != nil {
+		t.Fatalf("DestroyTask returned error: %v", err)
+	}
+	if mock.deleteCalled {
+		t.Fatal("expected virtualizer Delete to NOT be called for a prewarm task")
+	}
+	if _, ok := drv.tasks.Get(taskID); ok {
+		t.Fatalf("expected task %q to be removed from store", taskID)
 	}
 }
 

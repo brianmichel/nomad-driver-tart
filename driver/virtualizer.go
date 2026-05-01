@@ -85,4 +85,16 @@ type VirtualizationClient interface {
 	// must be pulled/downloaded before Setup, allowing the caller to emit
 	// progress events appropriately.
 	NeedsImageDownload(ctx context.Context, config VMConfig) (bool, error)
+
+	// PrepareRegistryEnv performs any registry authentication required to
+	// pull or clone the image referenced by the config and returns the
+	// environment slice that subsequent tart commands should inherit. It is
+	// intended to be called prior to Setup or prior to launching a prewarm
+	// pull via the executor.
+	PrepareRegistryEnv(ctx context.Context, config VMConfig) ([]string, error)
+
+	// BuildPrewarmArgs returns the CLI args for a prewarm (image prefetch)
+	// command that populates the local image cache without creating an
+	// allocation-specific VM.
+	BuildPrewarmArgs(config VMConfig) []string
 }

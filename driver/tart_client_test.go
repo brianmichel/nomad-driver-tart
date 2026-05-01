@@ -1,6 +1,20 @@
 package driver
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/hashicorp/go-hclog"
+)
+
+func TestBuildPrewarmArgs(t *testing.T) {
+	c := NewTartClient(hclog.NewNullLogger())
+	url := "ghcr.io/cirruslabs/macos-sequoia-base:latest"
+	args := c.BuildPrewarmArgs(VMConfig{TaskConfig: TaskConfig{URL: url}})
+
+	if len(args) != 2 || args[0] != "pull" || args[1] != url {
+		t.Fatalf("unexpected prewarm args: %v", args)
+	}
+}
 
 func TestConvertTartStatus(t *testing.T) {
 	cases := map[string]VMState{

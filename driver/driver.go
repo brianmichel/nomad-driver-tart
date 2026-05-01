@@ -33,7 +33,7 @@ var (
 	pluginInfo = &base.PluginInfoResponse{
 		Type:              base.PluginTypeDriver,
 		PluginApiVersions: []string{drivers.ApiVersion010},
-		PluginVersion:     "0.1.0",
+		PluginVersion:     "0.2.0",
 		Name:              pluginName,
 	}
 
@@ -84,6 +84,7 @@ type TaskState struct {
 	StartedAt   time.Time
 	CompletedAt time.Time
 	ExitResult  *drivers.ExitResult
+	Prewarm     bool
 }
 
 // NewTartDriver returns a new driver plugin implementation
@@ -168,6 +169,14 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	vmConfig := VMConfig{
 		TaskConfig:  taskConfig,
 		NomadConfig: cfg,
+	}
+
+	if taskConfig.Prewarm {
+		return d.startPrewarmTask(cfg, vmConfig, handle)
+	}
+
+	if taskConfig.SSHUser == "" || taskConfig.SSHPassword == "" {
+		return nil, nil, fmt.Errorf("ssh_user and ssh_password are required unless prewarm = true")
 	}
 
 	needsDownload, err := d.client.NeedsImageDownload(d.ctx, vmConfig)
@@ -295,6 +304,86 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	return handle, nil, nil
 }
 
+// startPrewarmTask runs `tart pull <url>` via the executor so that the image
+// is cached locally on the Nomad client. No VM is created; the task
+// completes as soon as the pull exits.
+func (d *Driver) startPrewarmTask(cfg *drivers.TaskConfig, vmConfig VMConfig, handle *drivers.TaskHandle) (*drivers.TaskHandle, *drivers.DriverNetwork, error) {
+	d.logger.Info("starting tart prewarm task", "url", vmConfig.TaskConfig.URL)
+
+	if _, err := d.client.PrepareRegistryEnv(d.ctx, vmConfig); err != nil {
+		return nil, nil, fmt.Errorf("failed to prepare registry env: %v", err)
+	}
+
+	d.eventer.EmitEvent(&drivers.TaskEvent{
+		TaskID:    cfg.ID,
+		TaskName:  cfg.Name,
+		AllocID:   cfg.AllocID,
+		Timestamp: time.Now(),
+		Message:   "Prewarming VM image",
+		Annotations: map[string]string{
+			"url": vmConfig.TaskConfig.URL,
+		},
+	})
+
+	pluginLogFile := filepath.Join(cfg.TaskDir().Dir, "executor.out")
+	execConfig := &executor.ExecutorConfig{
+		LogFile:  pluginLogFile,
+		LogLevel: "debug",
+	}
+
+	logger := d.logger.With("task_name", handle.Config.Name, "alloc_id", handle.Config.AllocID)
+	execImpl, pluginClient, err := executor.CreateExecutor(logger, d.nomadConfig, execConfig)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create executor: %v", err)
+	}
+
+	execCmd := &executor.ExecCommand{
+		Cmd:              "tart",
+		Args:             d.client.BuildPrewarmArgs(vmConfig),
+		Env:              d.TartEnvList(cfg),
+		User:             cfg.User,
+		TaskDir:          cfg.TaskDir().Dir,
+		StdoutPath:       cfg.StdoutPath,
+		StderrPath:       cfg.StderrPath,
+		NetworkIsolation: cfg.NetworkIsolation,
+	}
+
+	ps, err := execImpl.Launch(execCmd)
+	if err != nil {
+		pluginClient.Kill()
+		return nil, nil, fmt.Errorf("failed to launch prewarm: %v", err)
+	}
+
+	state := TaskState{
+		TaskConfig: cfg,
+		StartedAt:  time.Now(),
+		Prewarm:    true,
+	}
+	handle.State = drivers.TaskStateRunning
+	if err := handle.SetDriverState(&state); err != nil {
+		execImpl.Shutdown("", 0)
+		pluginClient.Kill()
+		return nil, nil, fmt.Errorf("failed to set driver state: %v", err)
+	}
+
+	h := &taskHandle{
+		exec:         execImpl,
+		pluginClient: pluginClient,
+		pid:          ps.Pid,
+		taskConfig:   cfg,
+		state:        drivers.TaskStateRunning,
+		startedAt:    time.Now().Round(time.Millisecond),
+		logger:       d.logger,
+		doneCh:       make(chan struct{}),
+		prewarm:      true,
+	}
+
+	d.tasks.Set(cfg.ID, h)
+	go h.run()
+
+	return handle, nil, nil
+}
+
 // RecoverTask recreates the in-memory state of a task from a TaskHandle.
 func (d *Driver) RecoverTask(h *drivers.TaskHandle) error {
 	if h == nil {
@@ -340,12 +429,12 @@ func (d *Driver) StopTask(taskID string, timeout time.Duration, signal string) e
 	}
 
 	var allocVMName string
-	if handle.taskConfig != nil {
+	if handle.taskConfig != nil && !handle.prewarm {
 		allocVMName = d.generateVMName(handle.taskConfig.AllocID)
 		if err := d.client.Stop(d.ctx, allocVMName, timeout); err != nil {
 			d.logger.Warn("failed to stop VM via virtualizer", "task_id", taskID, "error", err)
 		}
-	} else {
+	} else if handle.taskConfig == nil {
 		d.logger.Warn("task config missing while stopping task", "task_id", taskID)
 	}
 
@@ -396,12 +485,12 @@ func (d *Driver) DestroyTask(taskID string, force bool) error {
 		handle.pluginClient.Kill()
 	}
 
-	if handle.taskConfig != nil {
+	if handle.taskConfig != nil && !handle.prewarm {
 		allocVMName := d.generateVMName(handle.taskConfig.AllocID)
 		if err := d.client.Delete(d.ctx, allocVMName); err != nil {
 			d.logger.Warn("failed to delete VM via virtualizer", "task_id", taskID, "error", err)
 		}
-	} else {
+	} else if handle.taskConfig == nil {
 		d.logger.Warn("task config missing while destroying task", "task_id", taskID)
 	}
 
