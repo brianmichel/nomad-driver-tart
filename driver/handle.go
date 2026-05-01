@@ -49,6 +49,10 @@ type taskHandle struct {
 
 	// doneCh is closed when the task has finished executing
 	doneCh chan struct{}
+
+	// pullOnly indicates this task is a short-lived image prefetch; the
+	// driver must skip VM-lifecycle operations (run/stop/delete) for it.
+	pullOnly bool
 }
 
 // TaskStatus returns the current status of the task

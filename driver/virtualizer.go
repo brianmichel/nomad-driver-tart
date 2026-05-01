@@ -85,4 +85,16 @@ type VirtualizationClient interface {
 	// must be pulled/downloaded before Setup, allowing the caller to emit
 	// progress events appropriately.
 	NeedsImageDownload(ctx context.Context, config VMConfig) (bool, error)
+
+	// PrepareRegistryEnv performs any registry authentication required to
+	// pull or clone the image referenced by the config and returns the
+	// environment slice that subsequent tart commands should inherit. It is
+	// intended to be called prior to Setup or prior to launching a pull-only
+	// task via the executor.
+	PrepareRegistryEnv(ctx context.Context, config VMConfig) ([]string, error)
+
+	// BuildPullArgs returns the CLI args for an image-only pull that
+	// populates the local image cache without creating an allocation-specific
+	// VM. Used by pull_only tasks.
+	BuildPullArgs(config VMConfig) []string
 }
