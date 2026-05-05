@@ -34,6 +34,13 @@ type TaskConfig struct {
 
 	// Directories is a blocklist of host directories to mount into the VM
 	Directories []DirectoryMount `codec:"directory"`
+
+	// Command is an optional command to run inside the VM after the VM
+	// boots and SSH becomes reachable. Output is streamed to the task's
+	// stdout/stderr. The VM is left running regardless of exit status.
+	Command string `codec:"command"`
+	// Args are optional arguments passed to Command.
+	Args []string `codec:"args"`
 }
 
 type Auth struct {
@@ -88,6 +95,9 @@ var (
 			"caching_mode": hclspec.NewAttr("caching_mode", "string", false),
 			"sync_mode":    hclspec.NewAttr("sync_mode", "string", false),
 		})),
+
+		"command": hclspec.NewAttr("command", "string", false),
+		"args":    hclspec.NewAttr("args", "list(string)", false),
 
 		"directory": hclspec.NewBlockList("directory", hclspec.NewObject(map[string]*hclspec.Spec{
 			"name": hclspec.NewAttr("name", "string", true),

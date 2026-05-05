@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/go-hclog"
@@ -298,6 +299,18 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		d.streamSyslogWithRetry(syslogCtx, vmConfig, stdoutFile, stderrFile)
 	}()
 	d.tasks.Set(cfg.ID, h)
+
+	// If a startup command is configured, run it once SSH is available.
+	if taskConfig.Command != "" || len(taskConfig.Args) > 0 {
+		startupCtx, startupCancel := context.WithCancel(d.ctx)
+		h.startupCancel = startupCancel
+		go func() {
+			defer startupCancel()
+			d.executeStartupCommand(startupCtx, cfg.ID, cfg.Name, cfg.AllocID,
+				vmConfig, stdoutFile, stderrFile)
+		}()
+	}
+
 	go h.run()
 
 	// Return a driver handle
@@ -589,6 +602,135 @@ func (d *Driver) ExecTaskStreaming(ctx context.Context, taskID string, opts *dri
 
 func (d *Driver) generateVMName(allocationID string) string {
 	return fmt.Sprintf("nomad-%s", allocationID)
+}
+
+// waitForSSH blocks until the VM reports an IP address, indicating SSH
+// should be reachable. Retries with exponential backoff from 1s to 10s.
+// Returns nil when ready, or ctx.Err() on cancellation.
+func (d *Driver) waitForSSH(ctx context.Context, vmConfig VMConfig) error {
+	backoff := 1 * time.Second
+	maxBackoff := 10 * time.Second
+	vmName := d.generateVMName(vmConfig.NomadConfig.AllocID)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		ip, err := d.client.IPAddress(ctx, vmName)
+		if err == nil && ip != "" {
+			return nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		time.Sleep(backoff)
+		if backoff < maxBackoff {
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+		}
+	}
+}
+
+// executeStartupCommand waits for SSH to become available, then runs the
+// configured command+args inside the VM. Output is written to the provided
+// stdout/stderr writers.  This is a one-shot execution — it does not retry
+// on command failure. The VM is left running regardless of exit status.
+func (d *Driver) executeStartupCommand(
+	ctx context.Context,
+	taskID, taskName, allocID string,
+	vmConfig VMConfig,
+	stdout, stderr io.WriteCloser,
+) {
+	if err := d.waitForSSH(ctx, vmConfig); err != nil {
+		// Context cancelled; VM is stopping or driver is shutting down.
+		return
+	}
+
+	// Build the full command slice.
+	taskConfig := vmConfig.TaskConfig
+	var fullCmd []string
+	if taskConfig.Command != "" {
+		fullCmd = append([]string{taskConfig.Command}, taskConfig.Args...)
+	} else if len(taskConfig.Args) > 0 {
+		// Args without a command is a misconfiguration.
+		d.eventer.EmitEvent(&drivers.TaskEvent{
+			TaskID:    taskID,
+			TaskName:  taskName,
+			AllocID:   allocID,
+			Timestamp: time.Now(),
+			Message:   "Startup command misconfigured: args set but command is empty",
+		})
+		return
+	} else {
+		// Neither field set; nothing to do.
+		return
+	}
+
+	commandStr := fullCmd[0]
+	if len(fullCmd) > 1 {
+		commandStr = fmt.Sprintf("%s %s", fullCmd[0], strings.Join(fullCmd[1:], " "))
+	}
+
+	d.eventer.EmitEvent(&drivers.TaskEvent{
+		TaskID:    taskID,
+		TaskName:  taskName,
+		AllocID:   allocID,
+		Timestamp: time.Now(),
+		Message:   "Running startup command",
+		Annotations: map[string]string{
+			"command": commandStr,
+		},
+	})
+
+	exitCode, err := d.client.Exec(ctx, vmConfig, ExecOptions{
+		Command: fullCmd,
+		Stdout:  stdout,
+		Stderr:  stderr,
+		Tty:     false,
+	})
+
+	if err != nil {
+		// Check if it was a cancellation.
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		d.eventer.EmitEvent(&drivers.TaskEvent{
+			TaskID:    taskID,
+			TaskName:  taskName,
+			AllocID:   allocID,
+			Timestamp: time.Now(),
+			Message:   "Startup command failed",
+			Annotations: map[string]string{
+				"command": commandStr,
+				"error":   err.Error(),
+			},
+		})
+		return
+	}
+
+	d.eventer.EmitEvent(&drivers.TaskEvent{
+		TaskID:    taskID,
+		TaskName:  taskName,
+		AllocID:   allocID,
+		Timestamp: time.Now(),
+		Message:   "Startup command completed",
+		Annotations: map[string]string{
+			"command":   commandStr,
+			"exit_code": fmt.Sprintf("%d", exitCode),
+		},
+	})
 }
 
 // streamSyslogWithRetry attempts to start syslog streaming inside the VM using

@@ -35,7 +35,10 @@ func (m *mockVirtualizer) Delete(_ context.Context, vmName string) error {
 	m.deleteName = vmName
 	return nil
 }
-func (m *mockVirtualizer) List(context.Context) ([]VMInfo, error)                   { return nil, nil }
+func (m *mockVirtualizer) List(context.Context) ([]VMInfo, error) { return nil, nil }
+func (m *mockVirtualizer) IPAddress(context.Context, string) (string, error) {
+	return "192.168.64.10", nil
+}
 func (m *mockVirtualizer) Exec(context.Context, VMConfig, ExecOptions) (int, error) { return 0, nil }
 func (m *mockVirtualizer) BuildStartArgs(VMConfig) ([]string, error)                { return nil, nil }
 func (m *mockVirtualizer) NeedsImageDownload(context.Context, VMConfig) (bool, error) {

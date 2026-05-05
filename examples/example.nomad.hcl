@@ -73,6 +73,11 @@ EOH
         #   name = "desktop"
         #   path = "/Users/admin/Desktop"
         # }
+        #
+        # (optional) Post-boot command to run inside the VM after
+        # SSH becomes available. Output goes to nomad logs.
+        # command = "/bin/bash"
+        # args    = ["-c", "echo 'VM is ready'"]
       }
 
       resources {
