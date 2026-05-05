@@ -70,6 +70,9 @@ type VirtualizationClient interface {
 	// List returns a list of all virtual machines.
 	List(ctx context.Context) ([]VMInfo, error)
 
+	// IPAddress returns the IP address of a running VM.
+	IPAddress(ctx context.Context, vmName string) (string, error)
+
 	// Exec executes a command on the VM, similar to SSH.
 	// 'user' specifies the user to run the command as.
 	// Returns the command output or an error.
