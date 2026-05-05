@@ -33,4 +33,4 @@ go.work.sum
 dist
 *.key
 *.bundle
-
+.DS_Store
