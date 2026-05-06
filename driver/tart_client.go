@@ -340,8 +340,9 @@ func (c *TartClient) Exec(ctx context.Context, config VMConfig, opts ExecOptions
 		}
 	}
 
-	// Run the command
-	cmd := strings.Join(opts.Command, " ")
+	// Run the command. Quote each argv element so paths like
+	// /Volumes/My Shared Files/... survive the remote shell intact.
+	cmd := shellQuoteCommand(opts.Command)
 	if err := session.Run(cmd); err != nil {
 		if exitErr, ok := err.(*ssh.ExitError); ok {
 			return exitErr.ExitStatus(), nil
@@ -379,6 +380,14 @@ func (c *TartClient) SetVMResources(ctx context.Context, vmName string, cpu, mem
 		return fmt.Errorf("failed to set resources for VM %s: %v (stderr: %s)", vmName, err, stderr.String())
 	}
 	return nil
+}
+
+func shellQuoteCommand(argv []string) string {
+	quoted := make([]string, len(argv))
+	for i, arg := range argv {
+		quoted[i] = "'" + strings.ReplaceAll(arg, "'", "'\\''") + "'"
+	}
+	return strings.Join(quoted, " ")
 }
 
 func (c *TartClient) generateVMName(allocationID string) string {

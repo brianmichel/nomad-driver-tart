@@ -20,7 +20,7 @@ This driver allows Nomad to manage the lifecycle of Tart VMs, providing a way to
 - Task status reporting
 - Signal forwarding to tasks
 - Placeholder for resource usage statistics
-- Syslog streaming from VMs via SSH
+- Optional post-boot command execution with stdout/stderr forwarded to `nomad logs`
 - Control VM CPU and memory via Nomad's `resources` block
 - Optional VM disk size configuration
  - Networking modes: host-only, bridged, or Softnet with allow/expose
@@ -156,6 +156,10 @@ nomad agent -dev -config=./examples/agent.hcl -plugin-dir=$(pwd)
 ```bash
 nomad run ./examples/example.nomad.hcl
 ```
+
+Additional examples:
+- `examples/prewarm.nomad.hcl` — pre-pull a Tart image onto clients
+- `examples/cursor-self-hosted-pool.nomad.hcl` — install and start a Cursor personal self-hosted worker inside a macOS VM, set a unique hostname from the Nomad alloc ID, and run the agent in verbose mode for richer logs
 
 3. Check the status of the job and get the allocation ID:
 

@@ -3,6 +3,7 @@ package driver
 import (
 	"context"
 	"fmt"
+	"io"
 	"sync"
 	"time"
 
@@ -42,8 +43,13 @@ type taskHandle struct {
 	// task stops or is destroyed.
 	startupCancel context.CancelFunc
 
-	// syslogCancel cancels the syslog streaming goroutine
-	syslogCancel context.CancelFunc
+	// startupDoneCh is closed when the startup command goroutine exits.
+	startupDoneCh chan struct{}
+
+	// stdout/stderr are the task log writers kept open for the lifetime of the
+	// allocation so Nomad log collection can attach to them consistently.
+	stdout io.Closer
+	stderr io.Closer
 
 	// exitResult is the result of the task
 	exitResult *drivers.ExitResult
@@ -90,13 +96,20 @@ func (h *taskHandle) IsRunning() bool {
 // run waits on the executor and updates the task state when the process exits.
 func (h *taskHandle) run() {
 	defer close(h.doneCh)
-	// Cancel startup first so it exits before syslog closes file handles.
-	if h.startupCancel != nil {
-		h.startupCancel()
-	}
-	if h.syslogCancel != nil {
-		defer h.syslogCancel()
-	}
+	defer func() {
+		if h.startupCancel != nil {
+			h.startupCancel()
+		}
+		if h.startupDoneCh != nil {
+			<-h.startupDoneCh
+		}
+		if h.stdout != nil {
+			h.stdout.Close()
+		}
+		if h.stderr != nil {
+			h.stderr.Close()
+		}
+	}()
 
 	h.stateLock.Lock()
 	if h.exitResult == nil {

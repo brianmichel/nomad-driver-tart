@@ -76,8 +76,17 @@ EOH
         #
         # (optional) Post-boot command to run inside the VM after
         # SSH becomes available. Output goes to nomad logs.
+        #
         # command = "/bin/bash"
-        # args    = ["-c", "echo 'VM is ready'"]
+        # args = ["-c", <<-EOF
+        #   echo "startup: begin $(date)"
+        #   for i in $(seq 1 20); do
+        #     echo "startup: tick=$i time=$(date +%T)"
+        #     sleep 5
+        #   done
+        #   echo "startup: done $(date)"
+        # EOF
+        # ]
       }
 
       resources {

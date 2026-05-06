@@ -36,8 +36,9 @@ type TaskConfig struct {
 	Directories []DirectoryMount `codec:"directory"`
 
 	// Command is an optional command to run inside the VM after the VM
-	// boots and SSH becomes reachable. Output is streamed to the task's
-	// stdout/stderr. The VM is left running regardless of exit status.
+	// boots and SSH becomes reachable. Only this command's stdout/stderr
+	// is streamed to the Nomad task log. The VM is left running regardless
+	// of exit status.
 	Command string `codec:"command"`
 	// Args are optional arguments passed to Command.
 	Args []string `codec:"args"`

@@ -265,6 +265,21 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		return nil, nil, fmt.Errorf("failed to set driver state: %v", err)
 	}
 
+	stdoutFile, err := os.OpenFile(cfg.StdoutPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		execImpl.Shutdown("", 0)
+		pluginClient.Kill()
+		return nil, nil, fmt.Errorf("failed to open stdout file: %v", err)
+	}
+
+	stderrFile, err := os.OpenFile(cfg.StderrPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		stdoutFile.Close()
+		execImpl.Shutdown("", 0)
+		pluginClient.Kill()
+		return nil, nil, fmt.Errorf("failed to open stderr file: %v", err)
+	}
+
 	h := &taskHandle{
 		exec:         execImpl,
 		pluginClient: pluginClient,
@@ -274,38 +289,21 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		startedAt:    time.Now().Round(time.Millisecond),
 		logger:       d.logger,
 		doneCh:       make(chan struct{}),
+		stdout:       stdoutFile,
+		stderr:       stderrFile,
 	}
 
-	stdoutFile, err := os.OpenFile(cfg.StdoutPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to open stdout file: %v", err)
-	}
-
-	stderrFile, err := os.OpenFile(cfg.StderrPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to open stderr file: %v", err)
-	}
-
-	syslogCtx, cancel := context.WithCancel(d.ctx)
-	h.syslogCancel = cancel
-	d.logger.Trace("Starting log streaming", "stdout_path", cfg.StdoutPath, "stderr_path", cfg.StderrPath)
-
-	// Start the streaming in a goroutine that handles file closing
-	go func() {
-		defer stdoutFile.Close()
-		defer stderrFile.Close()
-
-		// Run syslog streaming with retry/backoff until it connects or context cancels
-		d.streamSyslogWithRetry(syslogCtx, vmConfig, stdoutFile, stderrFile)
-	}()
 	d.tasks.Set(cfg.ID, h)
 
-	// If a startup command is configured, run it once SSH is available.
+	// If a startup command is configured, run it once SSH is available and
+	// forward only that command's stdout/stderr into the Nomad task log.
 	if taskConfig.Command != "" || len(taskConfig.Args) > 0 {
 		startupCtx, startupCancel := context.WithCancel(d.ctx)
 		h.startupCancel = startupCancel
+		h.startupDoneCh = make(chan struct{})
+		d.logger.Trace("Starting guest command log forwarding", "stdout_path", cfg.StdoutPath, "stderr_path", cfg.StderrPath)
 		go func() {
-			defer startupCancel()
+			defer close(h.startupDoneCh)
 			d.executeStartupCommand(startupCtx, cfg.ID, cfg.Name, cfg.AllocID,
 				vmConfig, stdoutFile, stderrFile)
 		}()
@@ -731,54 +729,6 @@ func (d *Driver) executeStartupCommand(
 			"exit_code": fmt.Sprintf("%d", exitCode),
 		},
 	})
-}
-
-// streamSyslogWithRetry attempts to start syslog streaming inside the VM using
-// SSH and retries with exponential backoff until it succeeds or the context is
-// cancelled. It can take a little while for the VM to become responsive so retrying
-// is critical to making this reliant.
-func (d *Driver) streamSyslogWithRetry(ctx context.Context, vmConfig VMConfig, stdout, stderr io.WriteCloser) {
-	backoff := 1 * time.Second
-	maxBackoff := 10 * time.Second
-
-	for {
-		// allow cancellation between attempts
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
-		// Attempt to start log streaming over SSH
-		_, err := d.client.Exec(ctx, vmConfig, ExecOptions{
-			Command: []string{"/usr/bin/log", "stream", "--style", "syslog", "--level=info"},
-			Stdout:  stdout,
-			Stderr:  stderr,
-			Tty:     false,
-		})
-
-		if err != nil {
-			// Check if we should give up due to cancellation
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-
-			d.logger.Warn("Log streaming failed; will retry", "error", err)
-			time.Sleep(backoff)
-			if backoff < maxBackoff {
-				backoff *= 2
-				if backoff > maxBackoff {
-					backoff = maxBackoff
-				}
-			}
-			continue
-		}
-
-		// Exec returned without error; streaming ended or succeeded then exited.
-		return
-	}
 }
 
 func (d *Driver) TartEnvList(tc *drivers.TaskConfig) []string {

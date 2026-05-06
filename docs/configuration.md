@@ -87,7 +87,18 @@ The following parameters go under the task’s driver config block `task { drive
   template {
     data        = <<EOF
 #!/bin/bash
-setup-my-service --daemon
+set -euo pipefail
+
+echo "startup: begin $(date -u +%FT%TZ)"
+echo "startup: hostname=$(hostname)"
+echo "startup: user=$(whoami)"
+
+for i in $(seq 1 20); do
+  echo "startup: tick=$i time=$(date +%T) load=$(uptime)"
+  sleep 5
+done
+
+echo "startup: done $(date -u +%FT%TZ)"
 EOF
     destination = "local/startup.sh"
     perms       = "755"
@@ -168,7 +179,8 @@ Root disk options
 - Applied at start via `--root-disk-opts=...`; no guest action required. Read-only root will prevent writes to the system volume.
 
 Logs
-- The driver streams syslog from the VM using `log stream --style syslog --level info`; task logs are visible with `nomad logs`.
+- The driver does not stream the VM's full macOS system log.
+- If `command`/`args` are configured, that in-guest command's stdout/stderr is forwarded to `nomad logs`.
 
 
 ## End-to-End Example
