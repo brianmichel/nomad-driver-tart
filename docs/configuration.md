@@ -98,7 +98,7 @@ EOF
     command = "/bin/bash"
     # Inside macOS VMs, VirtioFS mounts appear under
     # /Volumes/My Shared Files/<name>/ — not at the host path.
-    args    = ["/Volumes/My Shared Files/alloc/startup.sh"]
+    args    = ["/Volumes/My Shared Files/alloc/local/startup.sh"]
 
     directory {
       name = "alloc"
@@ -106,6 +106,12 @@ EOF
     }
   }
   ```
+
+For `directory.path`, the driver also resolves these Nomad task directory
+variables to host paths before passing them to Tart:
+- `${NOMAD_ALLOC_DIR}`
+- `${NOMAD_TASK_DIR}`
+- `${NOMAD_SECRETS_DIR}`
 
 
 ## VM Resources (CPU, Memory)

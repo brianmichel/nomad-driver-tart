@@ -163,7 +163,6 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		return nil, nil, fmt.Errorf("failed to decode driver config: %v", err)
 	}
 
-	d.logger.Info("starting tart task", "task_cfg", hclog.Fmt("%+v", taskConfig))
 	handle := drivers.NewTaskHandle(taskHandleVersion)
 	handle.Config = cfg
 
@@ -171,6 +170,8 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		TaskConfig:  taskConfig,
 		NomadConfig: cfg,
 	}
+	vmConfig.TaskConfig.Directories = resolveDirectoryMounts(cfg, vmConfig.TaskConfig.Directories)
+	d.logger.Info("starting tart task", "task_cfg", hclog.Fmt("%+v", vmConfig.TaskConfig))
 
 	if taskConfig.PullOnly {
 		return d.startPullOnlyTask(cfg, vmConfig, handle)
