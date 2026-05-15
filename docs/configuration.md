@@ -69,6 +69,50 @@ The following parameters go under the task’s driver config block `task { drive
     - `tag` (string): Add a custom tag (emitted as `tag=<value>`).
   - Each block generates a `--dir=<spec>` argument to Tart.
 
+- `command` (string, optional): Command to run inside the VM after the VM
+  boots and SSH becomes reachable. Follows the same convention as Nomad's
+  Docker, exec, and raw_exec drivers. Output is streamed to the task's
+  stdout/stderr (visible via `nomad logs`). The VM is left running
+  regardless of the command's exit status.
+  - If set without `args`, the command is run with no arguments.
+  - If `args` is set without `command`, a misconfiguration event is emitted
+    and no command runs.
+
+- `args` (list of string, optional): Arguments passed to `command`. Only
+  meaningful when `command` is also set.
+
+  Example — run a startup script constructed via a Nomad template:
+
+  ```hcl
+  template {
+    data        = <<EOF
+#!/bin/bash
+setup-my-service --daemon
+EOF
+    destination = "local/startup.sh"
+    perms       = "755"
+  }
+
+  config {
+    # ... VM config ...
+    command = "/bin/bash"
+    # Inside macOS VMs, VirtioFS mounts appear under
+    # /Volumes/My Shared Files/<name>/ — not at the host path.
+    args    = ["/Volumes/My Shared Files/alloc/local/startup.sh"]
+
+    directory {
+      name = "alloc"
+      path = "${NOMAD_ALLOC_DIR}"
+    }
+  }
+  ```
+
+For `directory.path`, the driver also resolves these Nomad task directory
+variables to host paths before passing them to Tart:
+- `${NOMAD_ALLOC_DIR}`
+- `${NOMAD_TASK_DIR}`
+- `${NOMAD_SECRETS_DIR}`
+
 
 ## VM Resources (CPU, Memory)
 
@@ -94,8 +138,9 @@ resources {
 - Nomad templates with `destination = "secrets/..."` and `env = true` populate a file in the allocation’s secrets dir. The driver automatically mounts the allocation’s secrets directory into the VM as read-only via `--dir=secrets:<path>:ro`.
 
 How to use inside the VM:
-- Locate shared directories (see “Access from Inside the VM”). Your secrets file (e.g. `secrets.env`) will be under the mounted secrets share.
-- Source or read the file as needed (e.g., `set -a; . /path/to/secrets.env; set +a`).
+- Inside macOS guests, shared directories appear under `/Volumes/My Shared Files/`.
+- Your secrets file (e.g. `secrets.env`) will be at `/Volumes/My Shared Files/secrets/secrets.env`.
+- Source or read the file as needed (e.g., `set -a; . /Volumes/My\ Shared\ Files/secrets/secrets.env; set +a`).
 
 
 ## Networking Details and Using from the VM
@@ -129,7 +174,7 @@ Root disk options
 - Applied at start via `--root-disk-opts=...`; no guest action required. Read-only root will prevent writes to the system volume.
 
 Logs
-- The driver streams syslog from the VM using `log stream --style syslog --level info`; task logs are visible with `nomad logs`.
+- Output from the configured startup `command`/`args` is written to the task's stdout/stderr and is visible with `nomad logs`.
 
 
 ## End-to-End Example

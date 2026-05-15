@@ -38,8 +38,9 @@ type taskHandle struct {
 	// completedAt is when the task exited
 	completedAt time.Time
 
-	// syslogCancel cancels the syslog streaming goroutine
-	syslogCancel context.CancelFunc
+	// startupCancel cancels the startup command goroutine when the
+	// task stops or is destroyed.
+	startupCancel context.CancelFunc
 
 	// exitResult is the result of the task
 	exitResult *drivers.ExitResult
@@ -86,8 +87,10 @@ func (h *taskHandle) IsRunning() bool {
 // run waits on the executor and updates the task state when the process exits.
 func (h *taskHandle) run() {
 	defer close(h.doneCh)
-	if h.syslogCancel != nil {
-		defer h.syslogCancel()
+	// Keep the startup command alive for the lifetime of the task and only
+	// cancel it once the backing VM task exits.
+	if h.startupCancel != nil {
+		defer h.startupCancel()
 	}
 
 	h.stateLock.Lock()

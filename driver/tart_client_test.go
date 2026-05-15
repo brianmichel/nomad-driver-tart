@@ -36,3 +36,11 @@ func TestConvertTartStatus(t *testing.T) {
 		})
 	}
 }
+
+func TestShellQuoteCommand(t *testing.T) {
+	got := shellQuoteCommand([]string{"/bin/bash", "/Volumes/My Shared Files/alloc/startup.sh", "O'Hare"})
+	want := "'/bin/bash' '/Volumes/My Shared Files/alloc/startup.sh' 'O'\\''Hare'"
+	if got != want {
+		t.Fatalf("unexpected quoted command:\nwant: %s\n got: %s", want, got)
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/go-hclog"
@@ -162,7 +163,6 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		return nil, nil, fmt.Errorf("failed to decode driver config: %v", err)
 	}
 
-	d.logger.Info("starting tart task", "task_cfg", hclog.Fmt("%+v", taskConfig))
 	handle := drivers.NewTaskHandle(taskHandleVersion)
 	handle.Config = cfg
 
@@ -170,6 +170,8 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		TaskConfig:  taskConfig,
 		NomadConfig: cfg,
 	}
+	vmConfig.TaskConfig.Directories = resolveDirectoryMounts(cfg, vmConfig.TaskConfig.Directories)
+	d.logger.Info("starting tart task", "task_cfg", hclog.Fmt("%+v", vmConfig.TaskConfig))
 
 	if taskConfig.PullOnly {
 		return d.startPullOnlyTask(cfg, vmConfig, handle)
@@ -282,22 +284,28 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 
 	stderrFile, err := os.OpenFile(cfg.StderrPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
+		stdoutFile.Close()
 		return nil, nil, fmt.Errorf("failed to open stderr file: %v", err)
 	}
 
-	syslogCtx, cancel := context.WithCancel(d.ctx)
-	h.syslogCancel = cancel
-	d.logger.Trace("Starting log streaming", "stdout_path", cfg.StdoutPath, "stderr_path", cfg.StderrPath)
-
-	// Start the streaming in a goroutine that handles file closing
-	go func() {
-		defer stdoutFile.Close()
-		defer stderrFile.Close()
-
-		// Run syslog streaming with retry/backoff until it connects or context cancels
-		d.streamSyslogWithRetry(syslogCtx, vmConfig, stdoutFile, stderrFile)
-	}()
 	d.tasks.Set(cfg.ID, h)
+
+	// If a startup command is configured, run it once SSH is available.
+	if taskConfig.Command != "" || len(taskConfig.Args) > 0 {
+		startupCtx, startupCancel := context.WithCancel(d.ctx)
+		h.startupCancel = startupCancel
+		go func() {
+			defer startupCancel()
+			defer stdoutFile.Close()
+			defer stderrFile.Close()
+			d.executeStartupCommand(startupCtx, cfg.ID, cfg.Name, cfg.AllocID,
+				vmConfig, stdoutFile, stderrFile)
+		}()
+	} else {
+		stdoutFile.Close()
+		stderrFile.Close()
+	}
+
 	go h.run()
 
 	// Return a driver handle
@@ -591,11 +599,88 @@ func (d *Driver) generateVMName(allocationID string) string {
 	return fmt.Sprintf("nomad-%s", allocationID)
 }
 
-// streamSyslogWithRetry attempts to start syslog streaming inside the VM using
-// SSH and retries with exponential backoff until it succeeds or the context is
-// cancelled. It can take a little while for the VM to become responsive so retrying
-// is critical to making this reliant.
-func (d *Driver) streamSyslogWithRetry(ctx context.Context, vmConfig VMConfig, stdout, stderr io.WriteCloser) {
+// waitForSSH blocks until the VM reports an IP address, indicating SSH
+// should be reachable. Retries with exponential backoff from 1s to 10s.
+// Returns nil when ready, or ctx.Err() on cancellation.
+func (d *Driver) waitForSSH(ctx context.Context, vmConfig VMConfig) error {
+	backoff := 1 * time.Second
+	maxBackoff := 10 * time.Second
+	vmName := d.generateVMName(vmConfig.NomadConfig.AllocID)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		ip, err := d.client.IPAddress(ctx, vmName)
+		if err == nil && ip != "" {
+			return nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		time.Sleep(backoff)
+		if backoff < maxBackoff {
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+		}
+	}
+}
+
+// executeStartupCommand waits for SSH to become available, then runs the
+// configured command+args inside the VM. Output is written to the provided
+// stdout/stderr writers.  This is a one-shot execution — it does not retry
+// on command failure. The VM is left running regardless of exit status.
+func (d *Driver) executeStartupCommand(
+	ctx context.Context,
+	taskID, taskName, allocID string,
+	vmConfig VMConfig,
+	stdout, stderr io.WriteCloser,
+) {
+	// Build the full command slice.
+	taskConfig := vmConfig.TaskConfig
+	var fullCmd []string
+	if taskConfig.Command != "" {
+		fullCmd = append([]string{taskConfig.Command}, taskConfig.Args...)
+	} else if len(taskConfig.Args) > 0 {
+		// Args without a command is a misconfiguration.
+		d.eventer.EmitEvent(&drivers.TaskEvent{
+			TaskID:    taskID,
+			TaskName:  taskName,
+			AllocID:   allocID,
+			Timestamp: time.Now(),
+			Message:   "Startup command misconfigured: args set but command is empty",
+		})
+		return
+	} else {
+		// Neither field set; nothing to do.
+		return
+	}
+
+	commandStr := fullCmd[0]
+	if len(fullCmd) > 1 {
+		commandStr = fmt.Sprintf("%s %s", fullCmd[0], strings.Join(fullCmd[1:], " "))
+	}
+
+	d.eventer.EmitEvent(&drivers.TaskEvent{
+		TaskID:    taskID,
+		TaskName:  taskName,
+		AllocID:   allocID,
+		Timestamp: time.Now(),
+		Message:   "Running startup command",
+		Annotations: map[string]string{
+			"command": commandStr,
+		},
+	})
+
 	backoff := 1 * time.Second
 	maxBackoff := 10 * time.Second
 
@@ -607,23 +692,37 @@ func (d *Driver) streamSyslogWithRetry(ctx context.Context, vmConfig VMConfig, s
 		default:
 		}
 
-		// Attempt to start log streaming over SSH
-		_, err := d.client.Exec(ctx, vmConfig, ExecOptions{
-			Command: []string{"/usr/bin/log", "stream", "--style", "syslog", "--level=info"},
+		exitCode, err := d.client.Exec(ctx, vmConfig, ExecOptions{
+			Command: fullCmd,
 			Stdout:  stdout,
 			Stderr:  stderr,
 			Tty:     false,
 		})
 
-		if err != nil {
-			// Check if we should give up due to cancellation
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
+		if err == nil {
+			d.eventer.EmitEvent(&drivers.TaskEvent{
+				TaskID:    taskID,
+				TaskName:  taskName,
+				AllocID:   allocID,
+				Timestamp: time.Now(),
+				Message:   "Startup command completed",
+				Annotations: map[string]string{
+					"command":   commandStr,
+					"exit_code": fmt.Sprintf("%d", exitCode),
+				},
+			})
+			return
+		}
 
-			d.logger.Warn("Log streaming failed; will retry", "error", err)
+		// Check if it was a cancellation.
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		if isStartupSSHRetryable(err) {
+			d.logger.Debug("Startup command SSH not ready; retrying", "command", commandStr, "error", err)
 			time.Sleep(backoff)
 			if backoff < maxBackoff {
 				backoff *= 2
@@ -634,9 +733,30 @@ func (d *Driver) streamSyslogWithRetry(ctx context.Context, vmConfig VMConfig, s
 			continue
 		}
 
-		// Exec returned without error; streaming ended or succeeded then exited.
+		d.eventer.EmitEvent(&drivers.TaskEvent{
+			TaskID:    taskID,
+			TaskName:  taskName,
+			AllocID:   allocID,
+			Timestamp: time.Now(),
+			Message:   "Startup command failed",
+			Annotations: map[string]string{
+				"command": commandStr,
+				"error":   err.Error(),
+			},
+		})
 		return
 	}
+}
+
+func isStartupSSHRetryable(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	msg := err.Error()
+	return strings.Contains(msg, "failed to get VM IP:") ||
+		strings.Contains(msg, "failed to dial:") ||
+		strings.Contains(msg, "failed to create session:")
 }
 
 func (d *Driver) TartEnvList(tc *drivers.TaskConfig) []string {
