@@ -20,7 +20,7 @@ This driver allows Nomad to manage the lifecycle of Tart VMs, providing a way to
 - Task status reporting
 - Signal forwarding to tasks
 - Placeholder for resource usage statistics
-- Syslog streaming from VMs via SSH
+- Startup command execution with output streamed to task logs
 - Control VM CPU and memory via Nomad's `resources` block
 - Optional VM disk size configuration
  - Networking modes: host-only, bridged, or Softnet with allow/expose

@@ -284,21 +284,10 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 
 	stderrFile, err := os.OpenFile(cfg.StderrPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
+		stdoutFile.Close()
 		return nil, nil, fmt.Errorf("failed to open stderr file: %v", err)
 	}
 
-	syslogCtx, cancel := context.WithCancel(d.ctx)
-	h.syslogCancel = cancel
-	d.logger.Trace("Starting log streaming", "stdout_path", cfg.StdoutPath, "stderr_path", cfg.StderrPath)
-
-	// Start the streaming in a goroutine that handles file closing
-	go func() {
-		defer stdoutFile.Close()
-		defer stderrFile.Close()
-
-		// Run syslog streaming with retry/backoff until it connects or context cancels
-		d.streamSyslogWithRetry(syslogCtx, vmConfig, stdoutFile, stderrFile)
-	}()
 	d.tasks.Set(cfg.ID, h)
 
 	// If a startup command is configured, run it once SSH is available.
@@ -307,9 +296,14 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		h.startupCancel = startupCancel
 		go func() {
 			defer startupCancel()
+			defer stdoutFile.Close()
+			defer stderrFile.Close()
 			d.executeStartupCommand(startupCtx, cfg.ID, cfg.Name, cfg.AllocID,
 				vmConfig, stdoutFile, stderrFile)
 		}()
+	} else {
+		stdoutFile.Close()
+		stderrFile.Close()
 	}
 
 	go h.run()
@@ -763,54 +757,6 @@ func isStartupSSHRetryable(err error) bool {
 	return strings.Contains(msg, "failed to get VM IP:") ||
 		strings.Contains(msg, "failed to dial:") ||
 		strings.Contains(msg, "failed to create session:")
-}
-
-// streamSyslogWithRetry attempts to start syslog streaming inside the VM using
-// SSH and retries with exponential backoff until it succeeds or the context is
-// cancelled. It can take a little while for the VM to become responsive so retrying
-// is critical to making this reliant.
-func (d *Driver) streamSyslogWithRetry(ctx context.Context, vmConfig VMConfig, stdout, stderr io.WriteCloser) {
-	backoff := 1 * time.Second
-	maxBackoff := 10 * time.Second
-
-	for {
-		// allow cancellation between attempts
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
-		// Attempt to start log streaming over SSH
-		_, err := d.client.Exec(ctx, vmConfig, ExecOptions{
-			Command: []string{"/usr/bin/log", "stream", "--style", "syslog", "--level=info"},
-			Stdout:  stdout,
-			Stderr:  stderr,
-			Tty:     false,
-		})
-
-		if err != nil {
-			// Check if we should give up due to cancellation
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-
-			d.logger.Warn("Log streaming failed; will retry", "error", err)
-			time.Sleep(backoff)
-			if backoff < maxBackoff {
-				backoff *= 2
-				if backoff > maxBackoff {
-					backoff = maxBackoff
-				}
-			}
-			continue
-		}
-
-		// Exec returned without error; streaming ended or succeeded then exited.
-		return
-	}
 }
 
 func (d *Driver) TartEnvList(tc *drivers.TaskConfig) []string {

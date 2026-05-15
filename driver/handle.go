@@ -42,9 +42,6 @@ type taskHandle struct {
 	// task stops or is destroyed.
 	startupCancel context.CancelFunc
 
-	// syslogCancel cancels the syslog streaming goroutine
-	syslogCancel context.CancelFunc
-
 	// exitResult is the result of the task
 	exitResult *drivers.ExitResult
 
@@ -94,9 +91,6 @@ func (h *taskHandle) run() {
 	// cancel it once the backing VM task exits.
 	if h.startupCancel != nil {
 		defer h.startupCancel()
-	}
-	if h.syslogCancel != nil {
-		defer h.syslogCancel()
 	}
 
 	h.stateLock.Lock()

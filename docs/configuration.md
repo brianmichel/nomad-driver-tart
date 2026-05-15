@@ -174,7 +174,7 @@ Root disk options
 - Applied at start via `--root-disk-opts=...`; no guest action required. Read-only root will prevent writes to the system volume.
 
 Logs
-- The driver streams syslog from the VM using `log stream --style syslog --level info`; task logs are visible with `nomad logs`.
+- Output from the configured startup `command`/`args` is written to the task's stdout/stderr and is visible with `nomad logs`.
 
 
 ## End-to-End Example
