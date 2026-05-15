@@ -160,6 +160,7 @@ nomad run ./examples/example.nomad.hcl
 Additional examples:
 - `examples/prewarm.nomad.hcl` — pre-pull a Tart image onto clients
 - `examples/cursor-self-hosted-worker.nomad.hcl` — install and start a Cursor personal self-hosted worker inside a macOS VM
+- `examples/opencode-server.nomad.hcl` — start a batch macOS VM, install opencode, run `opencode serve`, and register a unique Nomad service
 
 3. Check the status of the job and get the allocation ID:
 

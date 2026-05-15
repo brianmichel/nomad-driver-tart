@@ -27,6 +27,11 @@ const (
 	// taskHandleVersion is the version of task handle which this driver sets
 	// and understands how to decode driver state
 	taskHandleVersion = 1
+
+	// vmIPTimeout is how long StartTask waits for Tart to report the guest IP.
+	// Nomad needs this synchronously so the driver can return DriverNetwork for
+	// service discovery/address_mode = "driver".
+	vmIPTimeout = 5 * time.Minute
 )
 
 var (
@@ -199,8 +204,12 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		})
 	}
 
-	if _, err := d.client.Setup(d.ctx, vmConfig); err != nil {
+	vmName, err := d.client.Setup(d.ctx, vmConfig)
+	if err != nil {
 		return nil, nil, fmt.Errorf("failed to setup VM: %v", err)
+	}
+	if vmName == "" {
+		vmName = d.generateVMName(cfg.AllocID)
 	}
 
 	if needsDownload {
@@ -251,6 +260,20 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		return nil, nil, fmt.Errorf("failed to launch VM: %v", err)
 	}
 
+	ipCtx, ipCancel := context.WithTimeout(d.ctx, vmIPTimeout)
+	vmIP, err := d.waitForVMIP(ipCtx, vmName)
+	ipCancel()
+	if err != nil {
+		execImpl.Shutdown("", 0)
+		pluginClient.Kill()
+		return nil, nil, fmt.Errorf("failed to get VM IP: %v", err)
+	}
+
+	driverNetwork := &drivers.DriverNetwork{
+		IP:            vmIP,
+		AutoAdvertise: true,
+	}
+
 	// Store the driver state on the handle
 	state := TaskState{
 		TaskConfig: cfg,
@@ -267,14 +290,15 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	}
 
 	h := &taskHandle{
-		exec:         execImpl,
-		pluginClient: pluginClient,
-		pid:          ps.Pid,
-		taskConfig:   cfg,
-		state:        drivers.TaskStateRunning,
-		startedAt:    time.Now().Round(time.Millisecond),
-		logger:       d.logger,
-		doneCh:       make(chan struct{}),
+		exec:          execImpl,
+		pluginClient:  pluginClient,
+		pid:           ps.Pid,
+		taskConfig:    cfg,
+		state:         drivers.TaskStateRunning,
+		startedAt:     time.Now().Round(time.Millisecond),
+		logger:        d.logger,
+		doneCh:        make(chan struct{}),
+		driverNetwork: driverNetwork,
 	}
 
 	stdoutFile, err := os.OpenFile(cfg.StdoutPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
@@ -308,8 +332,9 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 
 	go h.run()
 
-	// Return a driver handle
-	return handle, nil, nil
+	// Return a driver handle and the VM network so Nomad service discovery can
+	// advertise the guest address with address_mode = "driver".
+	return handle, driverNetwork, nil
 }
 
 // startPullOnlyTask runs `tart pull <url>` via the executor so that the image
@@ -599,29 +624,28 @@ func (d *Driver) generateVMName(allocationID string) string {
 	return fmt.Sprintf("nomad-%s", allocationID)
 }
 
-// waitForSSH blocks until the VM reports an IP address, indicating SSH
-// should be reachable. Retries with exponential backoff from 1s to 10s.
-// Returns nil when ready, or ctx.Err() on cancellation.
-func (d *Driver) waitForSSH(ctx context.Context, vmConfig VMConfig) error {
+// waitForVMIP blocks until Tart reports an IP address for the VM. Drivers must
+// return DriverNetwork synchronously from StartTask, so this is used before the
+// task is reported as running.
+func (d *Driver) waitForVMIP(ctx context.Context, vmName string) (string, error) {
 	backoff := 1 * time.Second
 	maxBackoff := 10 * time.Second
-	vmName := d.generateVMName(vmConfig.NomadConfig.AllocID)
 
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return "", ctx.Err()
 		default:
 		}
 
 		ip, err := d.client.IPAddress(ctx, vmName)
 		if err == nil && ip != "" {
-			return nil
+			return ip, nil
 		}
 
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return "", ctx.Err()
 		default:
 		}
 
@@ -633,6 +657,15 @@ func (d *Driver) waitForSSH(ctx context.Context, vmConfig VMConfig) error {
 			}
 		}
 	}
+}
+
+// waitForSSH blocks until the VM reports an IP address, indicating SSH
+// should be reachable. Retries with exponential backoff from 1s to 10s.
+// Returns nil when ready, or ctx.Err() on cancellation.
+func (d *Driver) waitForSSH(ctx context.Context, vmConfig VMConfig) error {
+	vmName := d.generateVMName(vmConfig.NomadConfig.AllocID)
+	_, err := d.waitForVMIP(ctx, vmName)
+	return err
 }
 
 // executeStartupCommand waits for SSH to become available, then runs the

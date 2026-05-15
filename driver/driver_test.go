@@ -49,6 +49,38 @@ func (m *mockVirtualizer) PrepareRegistryEnv(context.Context, VMConfig) ([]strin
 }
 func (m *mockVirtualizer) BuildPullArgs(VMConfig) []string { return nil }
 
+func TestTaskStatusIncludesDriverNetwork(t *testing.T) {
+	h := &taskHandle{
+		taskConfig: &drivers.TaskConfig{ID: "task-network", Name: "vm"},
+		state:      drivers.TaskStateRunning,
+		startedAt:  time.Now(),
+		driverNetwork: &drivers.DriverNetwork{
+			IP:            "192.168.64.10",
+			AutoAdvertise: true,
+			PortMap:       map[string]int{"opencode": 4096},
+		},
+	}
+
+	status := h.TaskStatus()
+	if status.NetworkOverride == nil {
+		t.Fatal("expected NetworkOverride to be set")
+	}
+	if status.NetworkOverride.IP != "192.168.64.10" {
+		t.Fatalf("expected VM IP, got %q", status.NetworkOverride.IP)
+	}
+	if !status.NetworkOverride.AutoAdvertise {
+		t.Fatal("expected AutoAdvertise to be true")
+	}
+	if got := status.NetworkOverride.PortMap["opencode"]; got != 4096 {
+		t.Fatalf("expected opencode port 4096, got %d", got)
+	}
+
+	status.NetworkOverride.PortMap["opencode"] = 1234
+	if got := h.driverNetwork.PortMap["opencode"]; got != 4096 {
+		t.Fatalf("expected TaskStatus to return a copy, original port got %d", got)
+	}
+}
+
 type stubExecutor struct {
 	shutdownCalled bool
 	shutdownSignal string

@@ -51,6 +51,10 @@ type taskHandle struct {
 	// doneCh is closed when the task has finished executing
 	doneCh chan struct{}
 
+	// driverNetwork is the guest network information returned to Nomad for
+	// service discovery/address_mode = "driver".
+	driverNetwork *drivers.DriverNetwork
+
 	// pullOnly indicates this task is a short-lived image prefetch; the
 	// driver must skip VM-lifecycle operations (run/stop/delete) for it.
 	pullOnly bool
@@ -62,12 +66,13 @@ func (h *taskHandle) TaskStatus() *drivers.TaskStatus {
 	defer h.stateLock.RUnlock()
 
 	status := &drivers.TaskStatus{
-		ID:          h.taskConfig.ID,
-		Name:        h.taskConfig.Name,
-		State:       h.state,
-		StartedAt:   h.startedAt,
-		CompletedAt: h.completedAt,
-		ExitResult:  h.exitResult,
+		ID:              h.taskConfig.ID,
+		Name:            h.taskConfig.Name,
+		State:           h.state,
+		StartedAt:       h.startedAt,
+		CompletedAt:     h.completedAt,
+		ExitResult:      h.exitResult,
+		NetworkOverride: h.driverNetwork.Copy(),
 		DriverAttributes: map[string]string{
 			// No custom attributes for now, but something like the task PID could be useful.
 			"pid": fmt.Sprintf("%d", h.pid),
