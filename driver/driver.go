@@ -651,11 +651,6 @@ func (d *Driver) executeStartupCommand(
 	vmConfig VMConfig,
 	stdout, stderr io.WriteCloser,
 ) {
-	if err := d.waitForSSH(ctx, vmConfig); err != nil {
-		// Context cancelled; VM is stopping or driver is shutting down.
-		return
-	}
-
 	// Build the full command slice.
 	taskConfig := vmConfig.TaskConfig
 	var fullCmd []string
@@ -692,19 +687,56 @@ func (d *Driver) executeStartupCommand(
 		},
 	})
 
-	exitCode, err := d.client.Exec(ctx, vmConfig, ExecOptions{
-		Command: fullCmd,
-		Stdout:  stdout,
-		Stderr:  stderr,
-		Tty:     false,
-	})
+	backoff := 1 * time.Second
+	maxBackoff := 10 * time.Second
 
-	if err != nil {
+	for {
+		// allow cancellation between attempts
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		exitCode, err := d.client.Exec(ctx, vmConfig, ExecOptions{
+			Command: fullCmd,
+			Stdout:  stdout,
+			Stderr:  stderr,
+			Tty:     false,
+		})
+
+		if err == nil {
+			d.eventer.EmitEvent(&drivers.TaskEvent{
+				TaskID:    taskID,
+				TaskName:  taskName,
+				AllocID:   allocID,
+				Timestamp: time.Now(),
+				Message:   "Startup command completed",
+				Annotations: map[string]string{
+					"command":   commandStr,
+					"exit_code": fmt.Sprintf("%d", exitCode),
+				},
+			})
+			return
+		}
+
 		// Check if it was a cancellation.
 		select {
 		case <-ctx.Done():
 			return
 		default:
+		}
+
+		if isStartupSSHRetryable(err) {
+			d.logger.Debug("Startup command SSH not ready; retrying", "command", commandStr, "error", err)
+			time.Sleep(backoff)
+			if backoff < maxBackoff {
+				backoff *= 2
+				if backoff > maxBackoff {
+					backoff = maxBackoff
+				}
+			}
+			continue
 		}
 
 		d.eventer.EmitEvent(&drivers.TaskEvent{
@@ -720,18 +752,17 @@ func (d *Driver) executeStartupCommand(
 		})
 		return
 	}
+}
 
-	d.eventer.EmitEvent(&drivers.TaskEvent{
-		TaskID:    taskID,
-		TaskName:  taskName,
-		AllocID:   allocID,
-		Timestamp: time.Now(),
-		Message:   "Startup command completed",
-		Annotations: map[string]string{
-			"command":   commandStr,
-			"exit_code": fmt.Sprintf("%d", exitCode),
-		},
-	})
+func isStartupSSHRetryable(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	msg := err.Error()
+	return strings.Contains(msg, "failed to get VM IP:") ||
+		strings.Contains(msg, "failed to dial:") ||
+		strings.Contains(msg, "failed to create session:")
 }
 
 // streamSyslogWithRetry attempts to start syslog streaming inside the VM using

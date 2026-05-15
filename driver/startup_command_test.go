@@ -230,8 +230,8 @@ func TestExecuteStartupCommand_SSHNeverAvailable(t *testing.T) {
 	// Should return without panicking after context expires.
 	drv.executeStartupCommand(ctx, "task-4", "my-task", "alloc-noip", vm, stdout, stderr)
 
-	if len(mock.execCalls) != 0 {
-		t.Fatalf("expected 0 Exec calls (never got IP), got %d", len(mock.execCalls))
+	if len(mock.execCalls) < 1 {
+		t.Fatalf("expected at least 1 Exec call while probing SSH readiness, got %d", len(mock.execCalls))
 	}
 }
 
@@ -257,6 +257,33 @@ func TestExecuteStartupCommand_ExecFails(t *testing.T) {
 	}
 }
 
+func TestExecuteStartupCommand_RetriesUntilSSHReady(t *testing.T) {
+	var attempts int
+	mock := &configurableMock{
+		execFn: func(ctx context.Context, c VMConfig, opts ExecOptions) (int, error) {
+			attempts++
+			if attempts < 3 {
+				return -1, fmt.Errorf("failed to dial: connection refused")
+			}
+			return 0, nil
+		},
+	}
+	drv := testDriverWithMock(t, mock)
+
+	vm := VMConfig{
+		TaskConfig:  TaskConfig{Command: "/bin/true"},
+		NomadConfig: &drivers.TaskConfig{AllocID: "alloc-retry"},
+	}
+	stdout, stderr := nopWriteCloser{&strings.Builder{}}, nopWriteCloser{&strings.Builder{}}
+
+	drv.executeStartupCommand(context.Background(),
+		"task-retry", "my-task", "alloc-retry", vm, stdout, stderr)
+
+	if len(mock.execCalls) != 3 {
+		t.Fatalf("expected 3 Exec calls, got %d", len(mock.execCalls))
+	}
+}
+
 func TestExecuteStartupCommand_NonZeroExit(t *testing.T) {
 	mock := &configurableMock{
 		execFn: func(ctx context.Context, c VMConfig, opts ExecOptions) (int, error) {
@@ -277,6 +304,30 @@ func TestExecuteStartupCommand_NonZeroExit(t *testing.T) {
 
 	if len(mock.execCalls) != 1 {
 		t.Fatalf("expected 1 Exec call, got %d", len(mock.execCalls))
+	}
+}
+
+func TestIsStartupSSHRetryable(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "nil", err: nil, want: false},
+		{name: "ip", err: fmt.Errorf("failed to get VM IP: unavailable"), want: true},
+		{name: "dial", err: fmt.Errorf("failed to dial: connection refused"), want: true},
+		{name: "session", err: fmt.Errorf("failed to create session: EOF"), want: true},
+		{name: "command failure", err: fmt.Errorf("failed to run command: command not found"), want: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isStartupSSHRetryable(tc.err); got != tc.want {
+				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 

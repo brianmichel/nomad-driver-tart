@@ -144,7 +144,7 @@ EOF
         show_ui      = false
 
         command = "/bin/bash"
-        args    = [" /Volumes/My Shared Files/local/startup.sh"]
+        args    = ["/Volumes/My Shared Files/local/startup.sh"]
 
         directory {
           name = "local"
