@@ -90,9 +90,10 @@ func (h *taskHandle) IsRunning() bool {
 // run waits on the executor and updates the task state when the process exits.
 func (h *taskHandle) run() {
 	defer close(h.doneCh)
-	// Cancel startup first so it exits before syslog closes file handles.
+	// Keep the startup command alive for the lifetime of the task and only
+	// cancel it once the backing VM task exits.
 	if h.startupCancel != nil {
-		h.startupCancel()
+		defer h.startupCancel()
 	}
 	if h.syslogCancel != nil {
 		defer h.syslogCancel()
