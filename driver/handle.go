@@ -3,6 +3,7 @@ package driver
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
@@ -11,6 +12,41 @@ import (
 	"github.com/hashicorp/nomad/drivers/shared/executor"
 	"github.com/hashicorp/nomad/plugins/drivers"
 )
+
+// taskStore is an in-memory datastore for taskHandles
+type taskStore struct {
+	store map[string]*taskHandle
+	lock  sync.RWMutex
+}
+
+// newTaskStore returns a new task store
+func newTaskStore() *taskStore {
+	return &taskStore{
+		store: map[string]*taskHandle{},
+	}
+}
+
+// Set stores a task handle
+func (ts *taskStore) Set(id string, handle *taskHandle) {
+	ts.lock.Lock()
+	defer ts.lock.Unlock()
+	ts.store[id] = handle
+}
+
+// Get retrieves a task handle
+func (ts *taskStore) Get(id string) (*taskHandle, bool) {
+	ts.lock.RLock()
+	defer ts.lock.RUnlock()
+	handle, ok := ts.store[id]
+	return handle, ok
+}
+
+// Delete removes a task handle
+func (ts *taskStore) Delete(id string) {
+	ts.lock.Lock()
+	defer ts.lock.Unlock()
+	delete(ts.store, id)
+}
 
 // taskHandle is a handle to a running task
 type taskHandle struct {
@@ -70,7 +106,7 @@ func (h *taskHandle) TaskStatus() *drivers.TaskStatus {
 		ExitResult:  h.exitResult,
 		DriverAttributes: map[string]string{
 			// No custom attributes for now, but something like the task PID could be useful.
-			"pid": fmt.Sprintf("%d", h.pid),
+			"pid": strconv.Itoa(h.pid),
 		},
 	}
 
@@ -115,4 +151,27 @@ func (h *taskHandle) run() {
 	h.exitResult.ExitCode = ps.ExitCode
 	h.exitResult.Signal = ps.Signal
 	h.completedAt = ps.Time
+}
+
+func (d *Driver) handleWait(ctx context.Context, handle *taskHandle, ch chan *drivers.ExitResult) {
+	defer close(ch)
+
+	var result *drivers.ExitResult
+	ps, err := handle.exec.Wait(ctx)
+	if err != nil {
+		result = &drivers.ExitResult{
+			Err: fmt.Errorf("executor: error waiting on process: %w", err),
+		}
+	} else {
+		result = &drivers.ExitResult{
+			ExitCode: ps.ExitCode,
+			Signal:   ps.Signal,
+		}
+	}
+
+	select {
+	case <-ctx.Done():
+	case <-d.ctx.Done():
+	case ch <- result:
+	}
 }

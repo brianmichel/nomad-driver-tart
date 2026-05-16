@@ -1,7 +1,7 @@
 package driver
 
 import (
-	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -22,7 +22,7 @@ func TestBuildTartNetworkArgs_Host(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	want := []string{"--net-host"}
-	if !reflect.DeepEqual(got, want) {
+	if !slices.Equal(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
 }
@@ -34,7 +34,7 @@ func TestBuildTartNetworkArgs_Bridged(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	want := []string{"--net-bridged", "en0"}
-	if !reflect.DeepEqual(got, want) {
+	if !slices.Equal(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
 }
@@ -46,7 +46,7 @@ func TestBuildTartNetworkArgs_Softnet(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	want := []string{"--net-softnet"}
-	if !reflect.DeepEqual(got, want) {
+	if !slices.Equal(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
 }
@@ -58,7 +58,7 @@ func TestBuildTartNetworkArgs_SoftnetAllowImpliesSoftnet(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	want := []string{"--net-softnet", "--net-softnet-allow", "192.168.0.0/24,10.0.0.0/16"}
-	if !reflect.DeepEqual(got, want) {
+	if !slices.Equal(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
 }
@@ -70,7 +70,7 @@ func TestBuildTartNetworkArgs_SoftnetExposeImpliesSoftnet(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	want := []string{"--net-softnet", "--net-softnet-expose", "2222:22,8080:80"}
-	if !reflect.DeepEqual(got, want) {
+	if !slices.Equal(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
 }
@@ -82,7 +82,7 @@ func TestBuildTartNetworkArgs_SoftnetAllowAndExpose(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	want := []string{"--net-softnet", "--net-softnet-allow", "0.0.0.0/0", "--net-softnet-expose", "2222:22"}
-	if !reflect.DeepEqual(got, want) {
+	if !slices.Equal(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
 }

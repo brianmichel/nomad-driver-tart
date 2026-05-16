@@ -1,9 +1,22 @@
 package driver
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
+
+// NetworkConfig describes networking configuration for a task
+type NetworkConfig struct {
+	// Mode selects networking mode: "host", "bridged", "softnet", or "shared" (default NAT)
+	Mode string `codec:"mode"`
+	// BridgedInterface is used when Mode == "bridged" to select the interface
+	BridgedInterface string `codec:"bridged_interface"`
+	// SoftnetAllow CIDRs when using Softnet; implies Softnet if Mode unspecified
+	SoftnetAllow []string `codec:"softnet_allow"`
+	// SoftnetExpose EXTERNAL:INTERNAL TCP port forward specs when using Softnet; implies Softnet
+	SoftnetExpose []string `codec:"softnet_expose"`
+}
 
 // buildTartNetworkArgs computes the appropriate tart networking flags from NetworkConfig.
 // It enforces mutual exclusivity among host, bridged, and softnet modes. Softnet is
@@ -31,17 +44,17 @@ func buildTartNetworkArgs(cfg *NetworkConfig) ([]string, error) {
 	// Validate combinations
 	if isHost {
 		if bridgedIf != "" || len(allow) > 0 || len(expose) > 0 {
-			return nil, fmt.Errorf("networking options conflict: host mode cannot be combined with bridged_interface or softnet options")
+			return nil, errors.New("networking options conflict: host mode cannot be combined with bridged_interface or softnet options")
 		}
 		return []string{"--net-host"}, nil
 	}
 
 	if isBridged {
 		if bridgedIf == "" {
-			return nil, fmt.Errorf("bridged mode requires 'bridged_interface'")
+			return nil, errors.New("bridged mode requires 'bridged_interface'")
 		}
 		if len(allow) > 0 || len(expose) > 0 {
-			return nil, fmt.Errorf("networking options conflict: bridged mode cannot be combined with softnet options")
+			return nil, errors.New("networking options conflict: bridged mode cannot be combined with softnet options")
 		}
 		return []string{"--net-bridged", bridgedIf}, nil
 	}
@@ -55,7 +68,7 @@ func buildTartNetworkArgs(cfg *NetworkConfig) ([]string, error) {
 			n = append(n, "--net-softnet-expose", strings.Join(expose, ","))
 		}
 		if bridgedIf != "" {
-			return nil, fmt.Errorf("networking options conflict: softnet mode cannot be combined with bridged_interface")
+			return nil, errors.New("networking options conflict: softnet mode cannot be combined with bridged_interface")
 		}
 		return n, nil
 	}

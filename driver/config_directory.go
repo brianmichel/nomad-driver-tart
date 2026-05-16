@@ -1,13 +1,30 @@
 package driver
 
 import (
-	"fmt"
+	"errors"
 	"strings"
 
 	"github.com/hashicorp/nomad/client/allocdir"
 	"github.com/hashicorp/nomad/client/taskenv"
 	"github.com/hashicorp/nomad/plugins/drivers"
 )
+
+// DirectoryMount represents a single directory block item from the config
+// with an optional name (purely descriptive), required host path, and
+// optional options.
+type DirectoryMount struct {
+	Name    string            `codec:"name"`
+	Path    string            `codec:"path"`
+	Options *DirectoryOptions `codec:"options"`
+}
+
+// DirectoryOptions controls how a directory mount is handled by tart.
+// - readonly: when true, append ":ro" to the mount spec
+// - tag: when set, append "@tag" to the mount spec
+type DirectoryOptions struct {
+	ReadOnly bool   `codec:"readonly"`
+	Tag      string `codec:"tag"`
+}
 
 // resolveDirectoryMounts rewrites Nomad task directory variables in directory
 // mounts to the corresponding host paths Tart expects for --dir flags.
@@ -69,7 +86,7 @@ func buildDirectoryArgs(dirs []DirectoryMount) ([]string, error) {
 	for _, d := range dirs {
 		path := strings.TrimSpace(d.Path)
 		if path == "" {
-			return nil, fmt.Errorf("directory.path is required for directory mounts")
+			return nil, errors.New("directory.path is required for directory mounts")
 		}
 
 		// Start with optional name prefix
