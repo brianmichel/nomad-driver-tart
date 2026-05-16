@@ -9,12 +9,12 @@ import (
 	"github.com/hashicorp/nomad/plugins/shared/structs"
 )
 
+const (
+	// maxVMSlots is the maximum number of concurrent VMs Apple Virtualization.framework allows.
+	maxVMSlots = 2
+)
+
 var (
-	// Apple's Virtualization.framework mandates a maximum of 2 VMs per host.
-	// This is enforced by the framework, trying to start 3 VMs will induce an error.
-	// So we keep track of the running VMs and publish whether or not there are 'slots'
-	// available on this machine to potentially schedule another VM.
-	maxVMSlots        = 2
 	availableSlotsKey = "driver.tart.available_slots"
 	versionKey        = "driver.tart.version"
 )

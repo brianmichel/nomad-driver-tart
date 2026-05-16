@@ -18,52 +18,40 @@ type nopWriteCloser struct{ *strings.Builder }
 
 func (nopWriteCloser) Close() error { return nil }
 
-// configurableMock adds knobs to mockVirtualizer so individual tests
-// can control Exec and IPAddress behavior.
-type configurableMock struct {
-	mockVirtualizer
-	ipAddrFn  func(ctx context.Context, vmName string) (string, error)
-	execFn    func(ctx context.Context, config VMConfig, opts ExecOptions) (int, error)
-	execCalls []execCall
-}
-
 type execCall struct {
 	Command []string
 	Tty     bool
 }
 
-func (m *configurableMock) IPAddress(ctx context.Context, vmName string) (string, error) {
+// testClient is a composable mock that satisfies the full Client interface.
+type testClient struct {
+	mockProber
+	mockLister
+	mockLifecycle
+	mockCommander
+	mockNetworker
+	mockBuilder
+	ipAddrFn  func(ctx context.Context, vmName string) (string, error)
+	execFn    func(ctx context.Context, config VMConfig, opts ExecOptions) (int, error)
+	execCalls []execCall
+}
+
+func (m *testClient) IPAddress(ctx context.Context, vmName string) (string, error) {
 	if m.ipAddrFn != nil {
 		return m.ipAddrFn(ctx, vmName)
 	}
-	return "[IP_ADDRESS]", nil
+	return m.mockNetworker.IPAddress(ctx, vmName)
 }
 
-func (m *configurableMock) Exec(ctx context.Context, c VMConfig, opts ExecOptions) (int, error) {
+func (m *testClient) Exec(ctx context.Context, c VMConfig, opts ExecOptions) (int, error) {
 	m.execCalls = append(m.execCalls, execCall{Command: opts.Command, Tty: opts.Tty})
 	if m.execFn != nil {
 		return m.execFn(ctx, c, opts)
 	}
-	return 0, nil
+	return m.mockCommander.Exec(ctx, c, opts)
 }
 
-// countingMock records how many times IPAddress was called.
-type countingMock struct {
-	mockVirtualizer
-	ipCalls int
-	ipErr   error
-}
-
-func (m *countingMock) IPAddress(ctx context.Context, vmName string) (string, error) {
-	m.ipCalls++
-	if m.ipErr != nil {
-		return "", m.ipErr
-	}
-	return "[IP_ADDRESS]", nil
-}
-
-// Helper to create a minimal Driver wired to a configurable mock.
-func testDriverWithMock(t *testing.T, mock *configurableMock) *Driver {
+func testDriverWithMock(t *testing.T, mock *testClient) *Driver {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -85,7 +73,6 @@ func testDriverWithMock(t *testing.T, mock *configurableMock) *Driver {
 // ---------------------------------------------------------------------------
 
 func TestDecodeCommandArgs(t *testing.T) {
-	// Direct struct test: verify the new fields are declared and tag correctly.
 	cfg := TaskConfig{
 		Command: "/bin/bash",
 		Args:    []string{"-c", "echo hi"},
@@ -96,9 +83,6 @@ func TestDecodeCommandArgs(t *testing.T) {
 	if len(cfg.Args) != 2 || cfg.Args[0] != "-c" || cfg.Args[1] != "echo hi" {
 		t.Fatalf("unexpected args: %v", cfg.Args)
 	}
-
-	// Verify that the codec tag matches the HCL schema name.
-	// (If these are wrong, Nomad won't parse the fields from HCL.)
 }
 
 func TestDecodeCommandArgs_NeitherSet(t *testing.T) {
@@ -128,12 +112,12 @@ func TestDecodeCommandArgs_ArgsOnly(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestExecuteStartupCommand_Success(t *testing.T) {
-	mock := &configurableMock{}
+	mock := &testClient{}
 	drv := testDriverWithMock(t, mock)
 
 	vm := VMConfig{
-		TaskConfig:  TaskConfig{Command: "/bin/sh", Args: []string{"-c", "echo ok"}},
-		NomadConfig: &drivers.TaskConfig{AllocID: "alloc-success"},
+		Driver: TaskConfig{Command: "/bin/sh", Args: []string{"-c", "echo ok"}},
+		Nomad:  &drivers.TaskConfig{AllocID: "alloc-success"},
 	}
 	stdout, stderr := nopWriteCloser{&strings.Builder{}}, nopWriteCloser{&strings.Builder{}}
 
@@ -153,12 +137,12 @@ func TestExecuteStartupCommand_Success(t *testing.T) {
 }
 
 func TestExecuteStartupCommand_CommandOnlyNoArgs(t *testing.T) {
-	mock := &configurableMock{}
+	mock := &testClient{}
 	drv := testDriverWithMock(t, mock)
 
 	vm := VMConfig{
-		TaskConfig:  TaskConfig{Command: "/usr/bin/whoami"},
-		NomadConfig: &drivers.TaskConfig{AllocID: "alloc-cmdonly"},
+		Driver: TaskConfig{Command: "/usr/bin/whoami"},
+		Nomad:  &drivers.TaskConfig{AllocID: "alloc-cmdonly"},
 	}
 	stdout, stderr := nopWriteCloser{&strings.Builder{}}, nopWriteCloser{&strings.Builder{}}
 
@@ -175,12 +159,12 @@ func TestExecuteStartupCommand_CommandOnlyNoArgs(t *testing.T) {
 }
 
 func TestExecuteStartupCommand_ArgsWithoutCommand(t *testing.T) {
-	mock := &configurableMock{}
+	mock := &testClient{}
 	drv := testDriverWithMock(t, mock)
 
 	vm := VMConfig{
-		TaskConfig:  TaskConfig{Args: []string{"-c", "echo hi"}},
-		NomadConfig: &drivers.TaskConfig{AllocID: "alloc-argsonly"},
+		Driver: TaskConfig{Args: []string{"-c", "echo hi"}},
+		Nomad:  &drivers.TaskConfig{AllocID: "alloc-argsonly"},
 	}
 	stdout, stderr := nopWriteCloser{&strings.Builder{}}, nopWriteCloser{&strings.Builder{}}
 
@@ -193,12 +177,12 @@ func TestExecuteStartupCommand_ArgsWithoutCommand(t *testing.T) {
 }
 
 func TestExecuteStartupCommand_NoCommandOrArgs(t *testing.T) {
-	mock := &configurableMock{}
+	mock := &testClient{}
 	drv := testDriverWithMock(t, mock)
 
 	vm := VMConfig{
-		TaskConfig:  TaskConfig{},
-		NomadConfig: &drivers.TaskConfig{AllocID: "alloc-empty"},
+		Driver: TaskConfig{},
+		Nomad:  &drivers.TaskConfig{AllocID: "alloc-empty"},
 	}
 	stdout, stderr := nopWriteCloser{&strings.Builder{}}, nopWriteCloser{&strings.Builder{}}
 
@@ -211,16 +195,16 @@ func TestExecuteStartupCommand_NoCommandOrArgs(t *testing.T) {
 }
 
 func TestExecuteStartupCommand_SSHNeverAvailable(t *testing.T) {
-	mock := &configurableMock{
+	mock := &testClient{
 		ipAddrFn: func(ctx context.Context, vmName string) (string, error) {
-			return "", fmt.Errorf("no IP yet")
+			return "", errors.New("no IP yet")
 		},
 	}
 	drv := testDriverWithMock(t, mock)
 
 	vm := VMConfig{
-		TaskConfig:  TaskConfig{Command: "/bin/true"},
-		NomadConfig: &drivers.TaskConfig{AllocID: "alloc-noip"},
+		Driver: TaskConfig{Command: "/bin/true"},
+		Nomad:  &drivers.TaskConfig{AllocID: "alloc-noip"},
 	}
 	stdout, stderr := nopWriteCloser{&strings.Builder{}}, nopWriteCloser{&strings.Builder{}}
 
@@ -236,16 +220,16 @@ func TestExecuteStartupCommand_SSHNeverAvailable(t *testing.T) {
 }
 
 func TestExecuteStartupCommand_ExecFails(t *testing.T) {
-	mock := &configurableMock{
+	mock := &testClient{
 		execFn: func(ctx context.Context, c VMConfig, opts ExecOptions) (int, error) {
-			return -1, fmt.Errorf("command not found")
+			return -1, errors.New("command not found")
 		},
 	}
 	drv := testDriverWithMock(t, mock)
 
 	vm := VMConfig{
-		TaskConfig:  TaskConfig{Command: "/bin/nonexistent"},
-		NomadConfig: &drivers.TaskConfig{AllocID: "alloc-fail"},
+		Driver: TaskConfig{Command: "/bin/nonexistent"},
+		Nomad:  &drivers.TaskConfig{AllocID: "alloc-fail"},
 	}
 	stdout, stderr := nopWriteCloser{&strings.Builder{}}, nopWriteCloser{&strings.Builder{}}
 
@@ -259,11 +243,11 @@ func TestExecuteStartupCommand_ExecFails(t *testing.T) {
 
 func TestExecuteStartupCommand_RetriesUntilSSHReady(t *testing.T) {
 	var attempts int
-	mock := &configurableMock{
+	mock := &testClient{
 		execFn: func(ctx context.Context, c VMConfig, opts ExecOptions) (int, error) {
 			attempts++
 			if attempts < 3 {
-				return -1, fmt.Errorf("failed to dial: connection refused")
+				return -1, fmt.Errorf("%w: connection refused", errSSHDialFailed)
 			}
 			return 0, nil
 		},
@@ -271,8 +255,8 @@ func TestExecuteStartupCommand_RetriesUntilSSHReady(t *testing.T) {
 	drv := testDriverWithMock(t, mock)
 
 	vm := VMConfig{
-		TaskConfig:  TaskConfig{Command: "/bin/true"},
-		NomadConfig: &drivers.TaskConfig{AllocID: "alloc-retry"},
+		Driver: TaskConfig{Command: "/bin/true"},
+		Nomad:  &drivers.TaskConfig{AllocID: "alloc-retry"},
 	}
 	stdout, stderr := nopWriteCloser{&strings.Builder{}}, nopWriteCloser{&strings.Builder{}}
 
@@ -285,7 +269,7 @@ func TestExecuteStartupCommand_RetriesUntilSSHReady(t *testing.T) {
 }
 
 func TestExecuteStartupCommand_NonZeroExit(t *testing.T) {
-	mock := &configurableMock{
+	mock := &testClient{
 		execFn: func(ctx context.Context, c VMConfig, opts ExecOptions) (int, error) {
 			return 5, nil
 		},
@@ -293,8 +277,8 @@ func TestExecuteStartupCommand_NonZeroExit(t *testing.T) {
 	drv := testDriverWithMock(t, mock)
 
 	vm := VMConfig{
-		TaskConfig:  TaskConfig{Command: "/bin/sh", Args: []string{"-c", "exit 5"}},
-		NomadConfig: &drivers.TaskConfig{AllocID: "alloc-exit5"},
+		Driver: TaskConfig{Command: "/bin/sh", Args: []string{"-c", "exit 5"}},
+		Nomad:  &drivers.TaskConfig{AllocID: "alloc-exit5"},
 	}
 	stdout, stderr := nopWriteCloser{&strings.Builder{}}, nopWriteCloser{&strings.Builder{}}
 
@@ -316,15 +300,16 @@ func TestIsStartupSSHRetryable(t *testing.T) {
 		want bool
 	}{
 		{name: "nil", err: nil, want: false},
-		{name: "ip", err: fmt.Errorf("failed to get VM IP: unavailable"), want: true},
-		{name: "dial", err: fmt.Errorf("failed to dial: connection refused"), want: true},
-		{name: "session", err: fmt.Errorf("failed to create session: EOF"), want: true},
-		{name: "command failure", err: fmt.Errorf("failed to run command: command not found"), want: false},
+		{name: "ip", err: fmt.Errorf("%w: unavailable", errVMIPUnavailable), want: true},
+		{name: "dial", err: fmt.Errorf("%w: connection refused", errSSHDialFailed), want: true},
+		{name: "session", err: fmt.Errorf("%w: EOF", errSSHSessionFailed), want: true},
+		{name: "command failure", err: errors.New("failed to run command: command not found"), want: false},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := isStartupSSHRetryable(tc.err); got != tc.want {
+			got := errors.Is(tc.err, errVMIPUnavailable) || errors.Is(tc.err, errSSHDialFailed) || errors.Is(tc.err, errSSHSessionFailed)
+			if got != tc.want {
 				t.Fatalf("got %v, want %v", got, tc.want)
 			}
 		})
@@ -332,7 +317,7 @@ func TestIsStartupSSHRetryable(t *testing.T) {
 }
 
 func TestExecuteStartupCommand_CancelledDuringExec(t *testing.T) {
-	mock := &configurableMock{
+	mock := &testClient{
 		execFn: func(ctx context.Context, c VMConfig, opts ExecOptions) (int, error) {
 			return -1, context.Canceled
 		},
@@ -340,8 +325,8 @@ func TestExecuteStartupCommand_CancelledDuringExec(t *testing.T) {
 	drv := testDriverWithMock(t, mock)
 
 	vm := VMConfig{
-		TaskConfig:  TaskConfig{Command: "/bin/sleep", Args: []string{"10"}},
-		NomadConfig: &drivers.TaskConfig{AllocID: "alloc-cancelled"},
+		Driver: TaskConfig{Command: "/bin/sleep", Args: []string{"10"}},
+		Nomad:  &drivers.TaskConfig{AllocID: "alloc-cancelled"},
 	}
 	stdout, stderr := nopWriteCloser{&strings.Builder{}}, nopWriteCloser{&strings.Builder{}}
 
@@ -360,12 +345,12 @@ func TestExecuteStartupCommand_CancelledDuringExec(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestWaitForSSH_ReadyImmediately(t *testing.T) {
-	mock := &countingMock{}
+	mock := &testClient{mockNetworker: mockNetworker{ip: "[IP_ADDRESS]"}}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	drv := &Driver{ctx: ctx, client: mock, logger: hclog.NewNullLogger()}
-	vm := VMConfig{NomadConfig: &drivers.TaskConfig{AllocID: "alloc-ready"}}
+	vm := VMConfig{Nomad: &drivers.TaskConfig{AllocID: "alloc-ready"}}
 
 	if err := drv.waitForSSH(ctx, vm); err != nil {
 		t.Fatalf("waitForSSH: %v", err)
@@ -376,11 +361,11 @@ func TestWaitForSSH_ReadyImmediately(t *testing.T) {
 }
 
 func TestWaitForSSH_ContextCancelled(t *testing.T) {
-	mock := &countingMock{ipErr: errors.New("no ip")}
+	mock := &testClient{mockNetworker: mockNetworker{ipErr: errors.New("no ip")}}
 	ctx, cancel := context.WithCancel(context.Background())
 
 	drv := &Driver{ctx: ctx, client: mock, logger: hclog.NewNullLogger()}
-	vm := VMConfig{NomadConfig: &drivers.TaskConfig{AllocID: "alloc-cancel"}}
+	vm := VMConfig{Nomad: &drivers.TaskConfig{AllocID: "alloc-cancel"}}
 
 	go func() {
 		time.Sleep(50 * time.Millisecond)

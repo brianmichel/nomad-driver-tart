@@ -5,6 +5,14 @@ import (
 	"strings"
 )
 
+// Options to specify how the root disk of the VM should be
+// prepared by the tart tool.
+type RootDiskOptions struct {
+	ReadOnly    bool    `codec:"readonly"`
+	SyncMode    *string `codec:"sync_mode"`
+	CachingMode *string `codec:"caching_mode"`
+}
+
 func buildRootDiskArgs(cfg *RootDiskOptions) ([]string, error) {
 	args := []string{}
 	if cfg == nil {
@@ -16,7 +24,7 @@ func buildRootDiskArgs(cfg *RootDiskOptions) ([]string, error) {
 	}
 
 	if cfg.CachingMode != nil {
-		var rawCachingMode = CleanValue(*cfg.CachingMode)
+		var rawCachingMode = normalize(*cfg.CachingMode)
 		var caching string
 		switch rawCachingMode {
 		case "automatic":
@@ -31,7 +39,7 @@ func buildRootDiskArgs(cfg *RootDiskOptions) ([]string, error) {
 	}
 
 	if cfg.SyncMode != nil {
-		var rawSyncMode = CleanValue(*cfg.SyncMode)
+		var rawSyncMode = normalize(*cfg.SyncMode)
 		var sync string
 		switch rawSyncMode {
 		case "fsync":
@@ -45,4 +53,11 @@ func buildRootDiskArgs(cfg *RootDiskOptions) ([]string, error) {
 	}
 
 	return []string{fmt.Sprintf("--root-disk-opts=%s", strings.Join(args, ","))}, nil
+}
+
+// normalize cleans the input value by converting it to lowercase and trimming whitespace.
+func normalize(value string) string {
+	value = strings.ToLower(value)
+	value = strings.TrimSpace(value)
+	return value
 }

@@ -1,7 +1,7 @@
 package driver
 
 import (
-	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/hashicorp/nomad/plugins/drivers"
@@ -24,7 +24,7 @@ func TestBuildDirectoryArgs_SimplePath(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	want := []string{"--dir=/host/data"}
-	if !reflect.DeepEqual(got, want) {
+	if !slices.Equal(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
 }
@@ -36,7 +36,7 @@ func TestBuildDirectoryArgs_ReadOnly(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	want := []string{"--dir=/host/secrets:ro"}
-	if !reflect.DeepEqual(got, want) {
+	if !slices.Equal(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
 }
@@ -48,7 +48,7 @@ func TestBuildDirectoryArgs_Tag(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	want := []string{"--dir=/host/assets:tag=assets"}
-	if !reflect.DeepEqual(got, want) {
+	if !slices.Equal(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
 }
@@ -60,7 +60,7 @@ func TestBuildDirectoryArgs_ReadOnlyAndTag(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	want := []string{"--dir=/host/shared:ro,tag=shared"}
-	if !reflect.DeepEqual(got, want) {
+	if !slices.Equal(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
 }
@@ -93,7 +93,7 @@ func TestResolveDirectoryMounts_NomadTaskPaths(t *testing.T) {
 		{Name: "nested", Path: "/opt/nomad/alloc/1234/vm/local/downloads"},
 	}
 
-	if !reflect.DeepEqual(got, want) {
+	if !slices.Equal(got, want) {
 		t.Fatalf("got %+v, want %+v", got, want)
 	}
 
@@ -123,7 +123,7 @@ func TestResolveDirectoryMounts_ImageIsolationPaths(t *testing.T) {
 		{Name: "nested", Path: "/opt/nomad/alloc/5678/vm/local/downloads"},
 	}
 
-	if !reflect.DeepEqual(got, want) {
+	if !slices.Equal(got, want) {
 		t.Fatalf("got %+v, want %+v", got, want)
 	}
 }

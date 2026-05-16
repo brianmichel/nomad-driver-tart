@@ -9,7 +9,7 @@ import (
 func TestBuildPullArgs(t *testing.T) {
 	c := NewTartClient(hclog.NewNullLogger())
 	url := "ghcr.io/cirruslabs/macos-sequoia-base:latest"
-	args := c.BuildPullArgs(VMConfig{TaskConfig: TaskConfig{URL: url}})
+	args := c.BuildPullArgs(VMConfig{Driver: TaskConfig{URL: url}})
 
 	if len(args) != 2 || args[0] != "pull" || args[1] != url {
 		t.Fatalf("unexpected pull args: %v", args)

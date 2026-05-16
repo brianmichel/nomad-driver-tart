@@ -1,7 +1,7 @@
 package driver
 
 import (
-	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -22,7 +22,7 @@ func TestBuildRootDiskArgs_ReadOnly(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	want := []string{"--root-disk-opts=ro"}
-	if !reflect.DeepEqual(got, want) {
+	if !slices.Equal(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
 }
@@ -41,7 +41,7 @@ func TestBuildRootDiskArgs_CachingModes_Normalized(t *testing.T) {
 			t.Fatalf("%s: unexpected error: %v", input, err)
 		}
 		want := []string{"--root-disk-opts=caching=" + exp}
-		if !reflect.DeepEqual(got, want) {
+		if !slices.Equal(got, want) {
 			t.Fatalf("%s: got %v, want %v", input, got, want)
 		}
 	}
@@ -61,7 +61,7 @@ func TestBuildRootDiskArgs_SyncModes_Normalized(t *testing.T) {
 			t.Fatalf("%s: unexpected error: %v", input, err)
 		}
 		want := []string{"--root-disk-opts=sync=" + exp}
-		if !reflect.DeepEqual(got, want) {
+		if !slices.Equal(got, want) {
 			t.Fatalf("%s: got %v, want %v", input, got, want)
 		}
 	}
@@ -76,7 +76,7 @@ func TestBuildRootDiskArgs_AllOptions(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	want := []string{"--root-disk-opts=ro,caching=cached,sync=full"}
-	if !reflect.DeepEqual(got, want) {
+	if !slices.Equal(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
 }

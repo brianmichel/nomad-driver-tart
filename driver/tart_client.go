@@ -5,30 +5,35 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
-	"net/url"
-	"os"
 	"os/exec"
 	"strings"
-	"time"
 
 	"github.com/hashicorp/go-hclog"
-	"golang.org/x/crypto/ssh"
 )
 
-// execCommandContext is a package-level indirection to allow tests to stub
-// out command execution. In er it points to exec.CommandContext.
-var execCommandContext = exec.CommandContext
-
-// TartClient is a wrapper around the tart CLI that implements the Virtualizer interface
-type TartClient struct {
-	logger hclog.Logger
+// runner abstracts over exec.CommandContext for testability.
+type runner interface {
+	Run(ctx context.Context, name string, args ...string) *exec.Cmd
 }
 
-// NewTartClient creates a new TartClient
-func NewTartClient(logger hclog.Logger) *TartClient {
-	return &TartClient{
+// execRunner is the production implementation that delegates to exec.CommandContext.
+type execRunner struct{}
+
+func (execRunner) Run(ctx context.Context, name string, args ...string) *exec.Cmd {
+	return exec.CommandContext(ctx, name, args...)
+}
+
+// tartCLI is a wrapper around the tart CLI that implements the Client interface
+type tartCLI struct {
+	logger hclog.Logger
+	runner runner
+}
+
+// NewTartClient creates a new tartCLI
+func NewTartClient(logger hclog.Logger) Client {
+	return &tartCLI{
 		logger: logger.Named("tart_client"),
+		runner: execRunner{},
 	}
 }
 
@@ -44,8 +49,8 @@ type tartVMInfo struct {
 }
 
 // Available checks if the tart binary is installed and accessible
-func (c *TartClient) Available(ctx context.Context) (string, error) {
-	cmd := exec.CommandContext(ctx, "tart", "--version")
+func (c *tartCLI) Available(ctx context.Context) (string, error) {
+	cmd := c.runner.Run(ctx, "tart", "--version")
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -61,141 +66,22 @@ func (c *TartClient) Available(ctx context.Context) (string, error) {
 	return version, nil
 }
 
-// PrepareRegistryEnv builds the environment slice passed to tart commands
-// and performs a `tart login` against the target registry when task-level
-// auth credentials are configured. The resulting environment is suitable for
-// reuse across subsequent tart invocations (clone, pull, etc.).
-func (c *TartClient) PrepareRegistryEnv(ctx context.Context, config VMConfig) ([]string, error) {
-	env := os.Environ()
-	if config.NomadConfig != nil {
-		env = append(env, config.NomadConfig.EnvList()...)
-	}
-
-	if !config.TaskConfig.Auth.IsValid() {
-		c.logger.Trace("Auth not provided; relying on env vars for registry access")
-		return env, nil
-	}
-
-	host, err := registryHost(config.TaskConfig.URL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse URL: %v", err)
-	}
-
-	loginCmd := execCommandContext(ctx, "tart", "login", host, "--username", config.TaskConfig.Auth.Username, "--password-stdin")
-	loginCmd.Stdin = strings.NewReader(config.TaskConfig.Auth.Password)
-	loginCmd.Env = env
-
-	var stderr bytes.Buffer
-	loginCmd.Stderr = &stderr
-
-	if err := loginCmd.Run(); err != nil {
-		return nil, fmt.Errorf("failed to login to container registry: %v (stderr: %s)", err, stderr.String())
-	}
-
-	return env, nil
-}
-
-// BuildPullArgs returns the tart CLI args used to prefetch an image into
-// the local OCI cache without creating a named VM.
-func (c *TartClient) BuildPullArgs(config VMConfig) []string {
-	return []string{"pull", config.TaskConfig.URL}
-}
-
-// SetupVM creates a new Tart VM from a URL
-func (c *TartClient) Setup(ctx context.Context, config VMConfig) (string, error) {
-	env, err := c.PrepareRegistryEnv(ctx, config)
-	if err != nil {
-		return "", err
-	}
-
-	vmName := c.generateVMName(config.NomadConfig.AllocID)
-	url := config.TaskConfig.URL
-
-	c.logger.Trace("Setting up Tart VM", "name", vmName, "url", url)
-	cmd := execCommandContext(ctx, "tart", "clone", url, vmName)
-	cmd.Env = env
-
-	// Configure VM resources before starting it using the Nomad resources block
-	var cpuCores int = 4    // Default to 4 cores
-	var memoryMB int = 4096 // Default to 4GB of memory
-	if config.NomadConfig.Resources != nil && config.NomadConfig.Resources.LinuxResources != nil {
-		// TODO: See if there's a better way of getting the number of cores
-		cpuCores = len(strings.Split(config.NomadConfig.Resources.LinuxResources.CpusetCpus, ","))
-		memoryMB = int(config.NomadConfig.Resources.LinuxResources.MemoryLimitBytes / 1024 / 1024)
-	}
-
-	diskGB := config.TaskConfig.DiskSize
-
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("failed to create VM %s from URL %s: %v (stderr: %s)",
-			vmName, url, err, stderr.String())
-	}
-
-	if err := c.SetVMResources(ctx, vmName, cpuCores, memoryMB, diskGB); err != nil {
-		return "", fmt.Errorf("failed to set VM resources: %v", err)
-	}
-
-	return vmName, nil
-}
-
-// RunVM starts a Tart VM with the given name
-func (c *TartClient) Start(ctx context.Context, vmName string, headless bool) (int, error) {
-	args := []string{"run", vmName}
-	if headless {
-		args = append(args, "--no-graphics")
-	}
-
-	c.logger.Trace("Starting Tart VM", "name", vmName, "headless", headless)
-	cmd := execCommandContext(ctx, "tart", args...)
-
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	if err := cmd.Start(); err != nil {
-		return -1, fmt.Errorf("failed to start VM %s: %v", vmName, err)
-	}
-
-	// Don't wait for the command to complete as it will block until the VM is stopped
-	return cmd.Process.Pid, nil
-}
-
-// StopVM stops a running Tart VM
-func (c *TartClient) Stop(ctx context.Context, vmName string, timeout time.Duration) error {
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	c.logger.Trace("Stopping Tart VM", "name", vmName)
-	cmd := exec.CommandContext(ctx, "tart", "stop", vmName)
-
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to stop VM %s: %v (stderr: %s)", vmName, err, stderr.String())
-	}
-
-	return nil
-}
-
 // ListVMs returns a list of all Tart VMs
-func (c *TartClient) List(ctx context.Context) ([]VMInfo, error) {
-	cmd := exec.CommandContext(ctx, "tart", "list", "--format", "json")
+func (c *tartCLI) List(ctx context.Context) ([]VMInfo, error) {
+	cmd := c.runner.Run(ctx, "tart", "list", "--format", "json")
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("failed to list VMs: %v (stderr: %s)", err, stderr.String())
+		return nil, fmt.Errorf("failed to list VMs: %w (stderr: %s)", err, stderr.String())
 	}
 
 	// Parse the JSON output from tart
 	var tartVMs []tartVMInfo
 	if err := json.Unmarshal(stdout.Bytes(), &tartVMs); err != nil {
-		return nil, fmt.Errorf("failed to parse VM list: %v", err)
+		return nil, fmt.Errorf("failed to parse VM list: %w", err)
 	}
 
 	// Convert from tart-specific format to our interface format
@@ -211,7 +97,7 @@ func (c *TartClient) List(ctx context.Context) ([]VMInfo, error) {
 }
 
 // Status returns the status of a specific VM
-func (c *TartClient) Status(ctx context.Context, vmName string) (VMState, error) {
+func (c *tartCLI) Status(ctx context.Context, vmName string) (VMState, error) {
 	vms, err := c.List(ctx)
 	if err != nil {
 		return "", err
@@ -226,227 +112,16 @@ func (c *TartClient) Status(ctx context.Context, vmName string) (VMState, error)
 	return "", fmt.Errorf("VM %s not found", vmName)
 }
 
-// CloneVM clones a Tart VM
-func (c *TartClient) CloneVM(ctx context.Context, sourceVM, targetVM string) error {
-	c.logger.Trace("Cloning Tart VM", "source", sourceVM, "target", targetVM)
-	cmd := exec.CommandContext(ctx, "tart", "clone", sourceVM, targetVM)
-
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to clone VM %s to %s: %v (stderr: %s)",
-			sourceVM, targetVM, err, stderr.String())
-	}
-
-	return nil
-}
-
-// DeleteVM deletes a Tart VM
-func (c *TartClient) Delete(ctx context.Context, vmName string) error {
-	c.logger.Trace("Deleting Tart VM", "name", vmName)
-	cmd := exec.CommandContext(ctx, "tart", "delete", vmName)
-
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to delete VM %s: %v (stderr: %s)", vmName, err, stderr.String())
-	}
-
-	return nil
-}
-
-// IPAddress returns the IP address of a running VM
-func (c *TartClient) IPAddress(ctx context.Context, vmName string) (string, error) {
-	cmd := exec.CommandContext(ctx, "tart", "ip", vmName)
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("failed to get IP address for VM %s: %v (stderr: %s)",
-			vmName, err, stderr.String())
-	}
-
-	// Trim any whitespace or newlines
-	return strings.TrimSpace(stdout.String()), nil
-}
-
-// Exec executes an SSH command on the VM using native Go SSH client
-func (c *TartClient) Exec(ctx context.Context, config VMConfig, opts ExecOptions) (int, error) {
-	if len(opts.Command) == 0 {
-		return -1, fmt.Errorf("command is required but was empty")
-	}
-
-	vmName := c.generateVMName(config.NomadConfig.AllocID)
-
-	ip, err := c.IPAddress(ctx, vmName)
-	if err != nil || ip == "" {
-		return -1, fmt.Errorf("failed to get VM IP: %v", err)
-	}
-	// SSH client config with password authentication
-	sshConfig := &ssh.ClientConfig{
-		User: config.TaskConfig.SSHUser,
-		Auth: []ssh.AuthMethod{
-			ssh.Password(config.TaskConfig.SSHPassword),
-		},
-		// TODO: Implement proper host key verification, we can probably just match the IP addresses.
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         30 * time.Second,
-	}
-
-	// Connect to SSH server
-	conn, err := ssh.Dial("tcp", net.JoinHostPort(ip, "22"), sshConfig)
-	if err != nil {
-		return -1, fmt.Errorf("failed to dial: %v", err)
-	}
-	defer conn.Close()
-
-	// Create a session
-	session, err := conn.NewSession()
-	if err != nil {
-		return -1, fmt.Errorf("failed to create session: %v", err)
-	}
-	defer session.Close()
-
-	// Set up input/output
-	session.Stdin = opts.Stdin
-	session.Stdout = opts.Stdout
-	session.Stderr = opts.Stderr
-
-	// Handle TTY if needed
-	if opts.Tty {
-		// Set up terminal modes
-		modes := ssh.TerminalModes{
-			ssh.ECHO:          0,     // disable echoing
-			ssh.TTY_OP_ISPEED: 14400, // input speed = 14.4kbaud
-			ssh.TTY_OP_OSPEED: 14400, // output speed = 14.4kbaud
-		}
-
-		// Request pseudo terminal
-		if err := session.RequestPty("xterm", 40, 80, modes); err != nil {
-			return -1, fmt.Errorf("request for pseudo terminal failed: %v", err)
-		}
-
-		// Handle window resizing
-		if opts.ResizeCh != nil {
-			go func() {
-				for sz := range opts.ResizeCh {
-					session.WindowChange(sz.Height, sz.Width)
-				}
-			}()
-		}
-	}
-
-	// Run the command. Quote each argv element so paths like
-	// /Volumes/My Shared Files/... survive the remote shell intact.
-	cmd := shellQuoteCommand(opts.Command)
-	if err := session.Run(cmd); err != nil {
-		if exitErr, ok := err.(*ssh.ExitError); ok {
-			return exitErr.ExitStatus(), nil
-		}
-		return -1, fmt.Errorf("failed to run command: %v", err)
-	}
-
-	return 0, nil
-}
-
-// SetVMResources modifies CPU cores, memory (MB), and disk size (GB) for a VM.
-func (c *TartClient) SetVMResources(ctx context.Context, vmName string, cpu, memoryMB, diskGB int) error {
-	args := []string{"set", vmName}
-	if cpu > 0 {
-		args = append(args, "--cpu", fmt.Sprintf("%d", cpu))
-	}
-	if memoryMB > 0 {
-		args = append(args, "--memory", fmt.Sprintf("%d", memoryMB))
-	}
-	if diskGB > 0 {
-		args = append(args, "--disk-size", fmt.Sprintf("%d", diskGB))
-	}
-
-	if len(args) == 2 {
-		return nil
-	}
-
-	c.logger.Trace("Setting VM resources", "name", vmName, "args", args)
-	cmd := execCommandContext(ctx, "tart", args...)
-
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to set resources for VM %s: %v (stderr: %s)", vmName, err, stderr.String())
-	}
-	return nil
-}
-
-func shellQuoteCommand(argv []string) string {
-	quoted := make([]string, len(argv))
-	for i, arg := range argv {
-		quoted[i] = "'" + strings.ReplaceAll(arg, "'", "'\\''") + "'"
-	}
-	return strings.Join(quoted, " ")
-}
-
-func (c *TartClient) generateVMName(allocationID string) string {
-	return fmt.Sprintf("nomad-%s", allocationID)
-}
-
-// BuildStartArgs computes the full set of CLI arguments required to start a
-// VM based on the provided configuration. This centralizes tart-specific flag
-// construction away from the driver.
-func (c *TartClient) BuildStartArgs(config VMConfig) ([]string, error) {
-	vmName := c.generateVMName(config.NomadConfig.AllocID)
-
-	args := []string{"run", vmName}
-	if !config.TaskConfig.ShowUI {
-		args = append(args, "--no-graphics")
-	}
-
-	// Mount the Nomad task's secrets directory read-only if present
-	if config.NomadConfig != nil {
-		td := config.NomadConfig.TaskDir()
-		if td != nil && td.SecretsDir != "" {
-			// Ensure that the secrets directory is mounted with a name to ensure
-			// multiple directories can be mounted if needed.
-			args = append(args, fmt.Sprintf("--dir=secrets:%s:ro", td.SecretsDir))
-		}
-	}
-
-	netArgs, err := buildTartNetworkArgs(config.TaskConfig.Network)
-	if err != nil {
-		return nil, err
-	}
-
-	rootDiskArgs, err := buildRootDiskArgs(config.TaskConfig.RootDisk)
-	if err != nil {
-		return nil, err
-	}
-
-	dirArgs, err := buildDirectoryArgs(config.TaskConfig.Directories)
-	if err != nil {
-		return nil, err
-	}
-
-	args = append(args, netArgs...)
-	args = append(args, rootDiskArgs...)
-	args = append(args, dirArgs...)
-
-	return args, nil
-}
-
 // NeedsImageDownload returns true when the referenced image is not yet
 // available locally and must be pulled prior to setup.
-func (c *TartClient) NeedsImageDownload(ctx context.Context, config VMConfig) (bool, error) {
+func (c *tartCLI) NeedsImageDownload(ctx context.Context, config VMConfig) (bool, error) {
 	vms, err := c.List(ctx)
 	if err != nil {
 		return false, err
 	}
 	for _, vm := range vms {
 		// Tart stores locally downloaded VMs by the URL of the image
-		if vm.Name == config.TaskConfig.URL {
+		if vm.Name == config.Driver.URL {
 			return false, nil
 		}
 	}
@@ -463,26 +138,4 @@ func convertTartStatus(tartStatus string) VMState {
 	default:
 		return VMStateStopped
 	}
-}
-
-// registryHost extracts the registry host from an image URL. It attempts to
-// parse the URL and, if no host is present, falls back to splitting the string
-// on the first '/'.
-func registryHost(image string) (string, error) {
-	u, err := url.Parse(image)
-	if err != nil {
-		return "", err
-	}
-
-	if u.Host != "" {
-		return u.Host, nil
-	}
-
-	// If the URL didn't have a host (e.g. missing scheme), derive it by
-	// taking everything before the first '/'.
-	parts := strings.SplitN(image, "/", 2)
-	if len(parts) == 0 || parts[0] == "" {
-		return "", fmt.Errorf("invalid image reference: %s", image)
-	}
-	return parts[0], nil
 }
