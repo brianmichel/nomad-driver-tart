@@ -72,7 +72,7 @@ type Commander interface {
 
 // Networker queries VM network info.
 type Networker interface {
-	IPAddress(ctx context.Context, vmName string) (string, error)
+	IPAddress(ctx context.Context, vmName string, network *NetworkConfig) (string, error)
 }
 
 // Builder constructs CLI arguments and environment for tart commands.

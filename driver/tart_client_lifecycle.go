@@ -126,9 +126,17 @@ func (c *tartCLI) Delete(ctx context.Context, vmName string) error {
 	return nil
 }
 
-// IPAddress returns the IP address of a running VM
-func (c *tartCLI) IPAddress(ctx context.Context, vmName string) (string, error) {
-	cmd := exec.CommandContext(ctx, "tart", "ip", vmName)
+// IPAddress returns the IP address of a running VM.
+// Bridged networking requires ARP-based resolution because Tart cannot rely on
+// the host DHCP lease database in that mode.
+func (c *tartCLI) IPAddress(ctx context.Context, vmName string, network *NetworkConfig) (string, error) {
+	args := []string{"ip"}
+	if network != nil && strings.EqualFold(strings.TrimSpace(network.Mode), "bridged") {
+		args = append(args, "--resolver=arp")
+	}
+	args = append(args, vmName)
+
+	cmd := c.runner.Run(ctx, "tart", args...)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

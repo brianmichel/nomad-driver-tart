@@ -36,11 +36,11 @@ type testClient struct {
 	execCalls []execCall
 }
 
-func (m *testClient) IPAddress(ctx context.Context, vmName string) (string, error) {
+func (m *testClient) IPAddress(ctx context.Context, vmName string, network *NetworkConfig) (string, error) {
 	if m.ipAddrFn != nil {
 		return m.ipAddrFn(ctx, vmName)
 	}
-	return m.mockNetworker.IPAddress(ctx, vmName)
+	return m.mockNetworker.IPAddress(ctx, vmName, network)
 }
 
 func (m *testClient) Exec(ctx context.Context, c VMConfig, opts ExecOptions) (int, error) {
