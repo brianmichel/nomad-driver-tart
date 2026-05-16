@@ -760,10 +760,15 @@ func isStartupSSHRetryable(err error) bool {
 }
 
 func (d *Driver) TartEnvList(tc *drivers.TaskConfig) []string {
-	// Patch the env list to include the homebrew paths to help tart
-	// find other binaries (like softnet) as needed.
+	// Patch the env list to include the homebrew paths to help tart find
+	// other binaries (like softnet) as needed.
+	//
+	// /usr/bin must be included so softnet can locate sudo when it
+	// self-elevates: its Command::new("sudo") path lookup is restricted to
+	// PATH, and a sudo-less PATH causes the probe to fail before any sudoers
+	// check, surfacing as "passwordless sudo was not available".
 	list := tc.EnvList()
-	list = append(list, "PATH=/opt/homebrew/bin:/opt/homebrew/sbin")
+	list = append(list, "PATH=/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin")
 
 	return list
 }
