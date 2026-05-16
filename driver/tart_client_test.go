@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/hashicorp/go-hclog"
+	"github.com/hashicorp/nomad/nomad/structs"
+	"github.com/hashicorp/nomad/plugins/drivers"
 )
 
 type recordingRunner struct {
@@ -16,6 +18,18 @@ type recordingRunner struct {
 	stdout string
 	stderr string
 	exit   int
+}
+
+func slicesContainSequence(haystack, needle []string) bool {
+	if len(needle) == 0 {
+		return true
+	}
+	for i := 0; i+len(needle) <= len(haystack); i++ {
+		if reflect.DeepEqual(haystack[i:i+len(needle)], needle) {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *recordingRunner) Run(ctx context.Context, name string, args ...string) *exec.Cmd {
@@ -104,5 +118,32 @@ func TestIPAddressUsesARPResolverForBridgedNetworking(t *testing.T) {
 	wantArgs := []string{"ip", "--resolver=arp", "vm-bridge"}
 	if !reflect.DeepEqual(r.args, wantArgs) {
 		t.Fatalf("unexpected args: want %v got %v", wantArgs, r.args)
+	}
+}
+
+func TestBuildStartArgsAddsSoftnetExposeFromNomadPorts(t *testing.T) {
+	c := &tartCLI{logger: hclog.NewNullLogger(), runner: &recordingRunner{}}
+	ports := structs.AllocatedPorts{{Label: "http", Value: 21043, To: 8000, HostIP: "192.168.1.10"}}
+	cfg := VMConfig{
+		Driver: TaskConfig{
+			Network: &NetworkConfig{Mode: "softnet", SoftnetAllow: []string{"0.0.0.0/0"}},
+		},
+		Nomad: &drivers.TaskConfig{
+			AllocID: "alloc-1",
+			Resources: &drivers.Resources{
+				Ports: &ports,
+			},
+		},
+	}
+
+	args, err := c.BuildStartArgs(cfg)
+	if err != nil {
+		t.Fatalf("BuildStartArgs returned error: %v", err)
+	}
+	if !reflect.DeepEqual(args[:3], []string{"run", "nomad-alloc-1", "--no-graphics"}) {
+		t.Fatalf("unexpected leading args: %v", args)
+	}
+	if !slicesContainSequence(args, []string{"--net-softnet", "--net-softnet-allow", "0.0.0.0/0", "--net-softnet-expose", "21043:8000"}) {
+		t.Fatalf("expected softnet expose args in %v", args)
 	}
 }

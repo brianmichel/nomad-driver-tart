@@ -77,7 +77,7 @@ func (d *Driver) startPullOnlyTask(cfg *drivers.TaskConfig, vmConfig VMConfig, h
 	execCmd := &executor.ExecCommand{
 		Cmd:              "tart",
 		Args:             d.client.BuildPullArgs(vmConfig),
-		Env:              d.tartEnvList(cfg),
+		Env:              tartEnvList(cfg),
 		User:             cfg.User,
 		TaskDir:          cfg.TaskDir().Dir,
 		StdoutPath:       cfg.StdoutPath,
@@ -141,6 +141,9 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	}
 	vmConfig.Driver.Directories = resolveDirectoryMounts(cfg, vmConfig.Driver.Directories)
 	d.logger.Info("starting tart task", "task_cfg", hclog.Fmt("%+v", vmConfig.Driver))
+	if exposures := nomadPortExposures(cfg); len(exposures) > 0 {
+		d.logger.Debug("found Nomad allocated port mappings for Tart networking", "ports", hclog.Fmt("%+v", exposures))
+	}
 
 	if taskConfig.PullOnly {
 		return d.startPullOnlyTask(cfg, vmConfig, handle)
@@ -185,7 +188,7 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	execCmd := &executor.ExecCommand{
 		Cmd:              "tart",
 		Args:             args,
-		Env:              d.tartEnvList(cfg),
+		Env:              tartEnvList(cfg),
 		User:             cfg.User,
 		TaskDir:          cfg.TaskDir().Dir,
 		StdoutPath:       cfg.StdoutPath,

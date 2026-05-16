@@ -18,6 +18,12 @@ job "opencode-server" {
       value     = "true"
     }
 
+    network {
+      port "http" {
+        to = 4096
+      }
+    }
+
     task "vm" {
       driver = "tart"
 
@@ -29,8 +35,8 @@ job "opencode-server" {
         // address, and port in Nomad service discovery.
         name         = "opencode"
         provider     = "nomad"
-        address_mode = "driver"
-        port         = "4096"
+        address_mode = "host"
+        port         = "http"
 
         tags = ["opencode-server"]
       }
@@ -114,10 +120,14 @@ EOF
         ssh_password = "${SSH_PASSWORD}"
         show_ui      = false
 
-        // No network block: use Tart's default shared/NAT networking.
-        // The driver uses this to SSH into the VM and run the startup script.
-        // The startup script logs the guest IP; from the Nomad client, open:
-        //   http://<guest-ip>:4096
+        // Softnet lets the driver map Nomad's allocated host port for the
+        // "http" label to the guest service listening on port 4096.
+        // With address_mode = "host", discover the service via the Nomad
+        // service registration rather than the guest IP.
+        network {
+          mode          = "softnet"
+          softnet_allow = ["0.0.0.0/0"]
+        }
 
         command = "/bin/bash"
         args    = ["/Volumes/My Shared Files/local/start-opencode.sh"]
