@@ -86,7 +86,7 @@ type mockNetworker struct {
 	ipCalls int
 }
 
-func (m *mockNetworker) IPAddress(context.Context, string) (string, error) {
+func (m *mockNetworker) IPAddress(context.Context, string, *NetworkConfig) (string, error) {
 	m.ipCalls++
 	return m.ip, m.ipErr
 }

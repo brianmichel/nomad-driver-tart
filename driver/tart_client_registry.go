@@ -70,7 +70,9 @@ func (c *tartCLI) BuildStartArgs(config VMConfig) ([]string, error) {
 		}
 	}
 
-	netArgs, err := buildTartNetworkArgs(config.Driver.Network)
+	networkCfg := appendNomadPortExposures(config.Driver.Network, nomadPortExposures(config.Nomad))
+
+	netArgs, err := buildTartNetworkArgs(networkCfg)
 	if err != nil {
 		return nil, err
 	}

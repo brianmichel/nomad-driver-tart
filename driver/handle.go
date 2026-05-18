@@ -90,6 +90,10 @@ type taskHandle struct {
 	// pullOnly indicates this task is a short-lived image prefetch; the
 	// driver must skip VM-lifecycle operations (run/stop/delete) for it.
 	pullOnly bool
+
+	// networkOverride is the driver-provided network metadata used by
+	// Nomad service registrations with address_mode = "driver".
+	networkOverride *drivers.DriverNetwork
 }
 
 // TaskStatus returns the current status of the task
@@ -97,13 +101,20 @@ func (h *taskHandle) TaskStatus() *drivers.TaskStatus {
 	h.stateLock.RLock()
 	defer h.stateLock.RUnlock()
 
+	var exitResult *drivers.ExitResult
+	if h.exitResult != nil {
+		copy := *h.exitResult
+		exitResult = &copy
+	}
+
 	status := &drivers.TaskStatus{
-		ID:          h.taskConfig.ID,
-		Name:        h.taskConfig.Name,
-		State:       h.state,
-		StartedAt:   h.startedAt,
-		CompletedAt: h.completedAt,
-		ExitResult:  h.exitResult,
+		ID:              h.taskConfig.ID,
+		Name:            h.taskConfig.Name,
+		State:           h.state,
+		StartedAt:       h.startedAt,
+		CompletedAt:     h.completedAt,
+		ExitResult:      exitResult,
+		NetworkOverride: h.networkOverride.Copy(),
 		DriverAttributes: map[string]string{
 			// No custom attributes for now, but something like the task PID could be useful.
 			"pid": strconv.Itoa(h.pid),

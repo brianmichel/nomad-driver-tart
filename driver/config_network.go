@@ -3,6 +3,7 @@ package driver
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -16,6 +17,46 @@ type NetworkConfig struct {
 	SoftnetAllow []string `codec:"softnet_allow"`
 	// SoftnetExpose EXTERNAL:INTERNAL TCP port forward specs when using Softnet; implies Softnet
 	SoftnetExpose []string `codec:"softnet_expose"`
+}
+
+// appendNomadPortExposures returns a copy of cfg with Nomad-allocated port
+// mappings appended to Softnet expose rules. It only modifies configurations
+// explicitly using Softnet so that other Tart networking modes keep their
+// existing behavior.
+func appendNomadPortExposures(cfg *NetworkConfig, exposures []nomadPortExposure) *NetworkConfig {
+	if len(exposures) == 0 {
+		return cfg
+	}
+
+	copyCfg := &NetworkConfig{}
+	if cfg != nil {
+		*copyCfg = *cfg
+		copyCfg.SoftnetAllow = slices.Clone(cfg.SoftnetAllow)
+		copyCfg.SoftnetExpose = slices.Clone(cfg.SoftnetExpose)
+	}
+
+	mode := strings.ToLower(strings.TrimSpace(copyCfg.Mode))
+	if mode != "softnet" {
+		return copyCfg
+	}
+
+	seen := make(map[string]struct{}, len(copyCfg.SoftnetExpose))
+	for _, expose := range copyCfg.SoftnetExpose {
+		seen[expose] = struct{}{}
+	}
+	for _, exposure := range exposures {
+		if exposure.HostPort <= 0 || exposure.GuestPort <= 0 {
+			continue
+		}
+		spec := fmt.Sprintf("%d:%d", exposure.HostPort, exposure.GuestPort)
+		if _, ok := seen[spec]; ok {
+			continue
+		}
+		copyCfg.SoftnetExpose = append(copyCfg.SoftnetExpose, spec)
+		seen[spec] = struct{}{}
+	}
+
+	return copyCfg
 }
 
 // buildTartNetworkArgs computes the appropriate tart networking flags from NetworkConfig.

@@ -32,6 +32,18 @@ func openTaskLog(path string) (*os.File, error) {
 	return os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 }
 
+func (d *Driver) resolveDriverNetwork(vmConfig VMConfig) (*drivers.DriverNetwork, error) {
+	ctx, cancel := context.WithTimeout(d.ctx, 45*time.Second)
+	defer cancel()
+
+	ip, err := d.waitForIPAddress(ctx, vmConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to determine VM IP for driver network override: %w", err)
+	}
+
+	return &drivers.DriverNetwork{IP: ip}, nil
+}
+
 func (d *Driver) emitTaskEvent(cfg *drivers.TaskConfig, msg string, annotations map[string]string) {
 	d.eventer.EmitEvent(&drivers.TaskEvent{
 		TaskID:      cfg.ID,
@@ -65,7 +77,7 @@ func (d *Driver) startPullOnlyTask(cfg *drivers.TaskConfig, vmConfig VMConfig, h
 	execCmd := &executor.ExecCommand{
 		Cmd:              "tart",
 		Args:             d.client.BuildPullArgs(vmConfig),
-		Env:              d.tartEnvList(cfg),
+		Env:              tartEnvList(cfg),
 		User:             cfg.User,
 		TaskDir:          cfg.TaskDir().Dir,
 		StdoutPath:       cfg.StdoutPath,
@@ -129,6 +141,9 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	}
 	vmConfig.Driver.Directories = resolveDirectoryMounts(cfg, vmConfig.Driver.Directories)
 	d.logger.Info("starting tart task", "task_cfg", hclog.Fmt("%+v", vmConfig.Driver))
+	if exposures := nomadPortExposures(cfg); len(exposures) > 0 {
+		d.logger.Debug("found Nomad allocated port mappings for Tart networking", "ports", hclog.Fmt("%+v", exposures))
+	}
 
 	if taskConfig.PullOnly {
 		return d.startPullOnlyTask(cfg, vmConfig, handle)
@@ -173,7 +188,7 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	execCmd := &executor.ExecCommand{
 		Cmd:              "tart",
 		Args:             args,
-		Env:              d.tartEnvList(cfg),
+		Env:              tartEnvList(cfg),
 		User:             cfg.User,
 		TaskDir:          cfg.TaskDir().Dir,
 		StdoutPath:       cfg.StdoutPath,
@@ -202,15 +217,21 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		return nil, nil, fmt.Errorf("failed to set driver state: %w", err)
 	}
 
+	networkOverride, err := d.resolveDriverNetwork(vmConfig)
+	if err != nil {
+		d.logger.Warn("failed to determine driver network override; continuing without one", "task_id", cfg.ID, "error", err)
+	}
+
 	h := &taskHandle{
-		exec:         execImpl,
-		pluginClient: pluginClient,
-		pid:          ps.Pid,
-		taskConfig:   cfg,
-		state:        drivers.TaskStateRunning,
-		startedAt:    time.Now(),
-		logger:       d.logger,
-		doneCh:       make(chan struct{}),
+		exec:            execImpl,
+		pluginClient:    pluginClient,
+		pid:             ps.Pid,
+		taskConfig:      cfg,
+		state:           drivers.TaskStateRunning,
+		startedAt:       time.Now(),
+		logger:          d.logger,
+		doneCh:          make(chan struct{}),
+		networkOverride: networkOverride.Copy(),
 	}
 
 	stdoutFile, err := openTaskLog(cfg.StdoutPath)
@@ -245,7 +266,7 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	go h.run()
 
 	// Return a driver handle
-	return handle, nil, nil
+	return handle, networkOverride.Copy(), nil
 }
 
 // RecoverTask recreates the in-memory state of a task from a TaskHandle.

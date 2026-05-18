@@ -27,7 +27,7 @@ func (c *tartCLI) Exec(ctx context.Context, config VMConfig, opts ExecOptions) (
 
 	vmName := vmName(config.Nomad.AllocID)
 
-	ip, err := c.IPAddress(ctx, vmName)
+	ip, err := c.IPAddress(ctx, vmName, config.Driver.Network)
 	if err != nil || ip == "" {
 		return -1, fmt.Errorf("%w: %v", errVMIPUnavailable, err)
 	}

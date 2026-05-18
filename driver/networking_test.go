@@ -87,6 +87,29 @@ func TestBuildTartNetworkArgs_SoftnetAllowAndExpose(t *testing.T) {
 	}
 }
 
+func TestAppendNomadPortExposures_Softnet(t *testing.T) {
+	cfg := &NetworkConfig{Mode: "softnet", SoftnetAllow: []string{"0.0.0.0/0"}}
+	got := appendNomadPortExposures(cfg, []nomadPortExposure{{Label: "http", HostPort: 21043, GuestPort: 8000}})
+	want := &NetworkConfig{Mode: "softnet", SoftnetAllow: []string{"0.0.0.0/0"}, SoftnetExpose: []string{"21043:8000"}}
+	if got == cfg {
+		t.Fatal("expected a copied config")
+	}
+	if !slices.Equal(got.SoftnetAllow, want.SoftnetAllow) || !slices.Equal(got.SoftnetExpose, want.SoftnetExpose) || got.Mode != want.Mode {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+	if len(cfg.SoftnetExpose) != 0 {
+		t.Fatalf("expected original config to be unchanged, got %#v", cfg)
+	}
+}
+
+func TestAppendNomadPortExposures_NonSoftnetNoop(t *testing.T) {
+	cfg := &NetworkConfig{Mode: "shared"}
+	got := appendNomadPortExposures(cfg, []nomadPortExposure{{HostPort: 21043, GuestPort: 8000}})
+	if got.Mode != "shared" || len(got.SoftnetExpose) != 0 {
+		t.Fatalf("unexpected config: %#v", got)
+	}
+}
+
 func TestBuildTartNetworkArgs_Conflicts(t *testing.T) {
 	cases := []*NetworkConfig{
 		{Mode: "host", BridgedInterface: "en0"},

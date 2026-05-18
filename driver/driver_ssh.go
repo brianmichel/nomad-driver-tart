@@ -12,23 +12,22 @@ import (
 	"github.com/hashicorp/nomad/plugins/drivers"
 )
 
-// waitForSSH blocks until the VM reports an IP address, indicating SSH
-// should be reachable. Retries with exponential backoff from 1s to 10s.
-// Returns nil when ready, or ctx.Err() on cancellation.
-func (d *Driver) waitForSSH(ctx context.Context, vmConfig VMConfig) error {
+// waitForIPAddress blocks until the VM reports an IP address. Retries with
+// exponential backoff from 1s to 10s and returns the discovered address.
+func (d *Driver) waitForIPAddress(ctx context.Context, vmConfig VMConfig) (string, error) {
 	backoff := 1 * time.Second
 	maxBackoff := 10 * time.Second
 	name := vmName(vmConfig.Nomad.AllocID)
 
 	for {
-		ip, err := d.client.IPAddress(ctx, name)
+		ip, err := d.client.IPAddress(ctx, name, vmConfig.Driver.Network)
 		if err == nil && ip != "" {
-			return nil
+			return ip, nil
 		}
 
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return "", ctx.Err()
 		default:
 		}
 
@@ -40,6 +39,14 @@ func (d *Driver) waitForSSH(ctx context.Context, vmConfig VMConfig) error {
 			}
 		}
 	}
+}
+
+// waitForSSH blocks until the VM reports an IP address, indicating SSH
+// should be reachable. Retries with exponential backoff from 1s to 10s.
+// Returns nil when ready, or ctx.Err() on cancellation.
+func (d *Driver) waitForSSH(ctx context.Context, vmConfig VMConfig) error {
+	_, err := d.waitForIPAddress(ctx, vmConfig)
+	return err
 }
 
 // executeStartupCommand waits for SSH to become available, then runs the
