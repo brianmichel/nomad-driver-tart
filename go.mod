@@ -1,6 +1,6 @@
 module github.com/brianmichel/nomad-driver-tart
 
-go 1.25.8
+go 1.27.2
 
 replace github.com/opencontainers/runc => github.com/opencontainers/runc v1.1.9
 
