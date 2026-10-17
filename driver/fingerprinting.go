@@ -17,6 +17,7 @@ const (
 var (
 	availableSlotsKey = "driver.tart.available_slots"
 	versionKey        = "driver.tart.version"
+	pluginVersionKey  = "driver.tart.plugin.version"
 )
 
 // handleFingerprint runs an infinite loop that sends the driver's fingerprint
@@ -50,6 +51,7 @@ func (d *Driver) buildFingerprint() *drivers.Fingerprint {
 
 	// Set driver attributes
 	fp.Attributes["driver.tart"] = structs.NewBoolAttribute(true)
+	fp.Attributes[pluginVersionKey] = structs.NewStringAttribute(pluginInfo.PluginVersion)
 
 	// Check if the driver is enabled
 	if !d.config.Enabled {

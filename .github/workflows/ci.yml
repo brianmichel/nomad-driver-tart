@@ -27,7 +27,7 @@ jobs:
         env:
           GOOS: darwin
           GOARCH: arm64
-        run: go build -o nomad-driver-tart-${GOOS}-${GOARCH} main.go
+        run: make build BINARY_NAME=nomad-driver-tart-${GOOS}-${GOARCH}
       - uses: actions/upload-artifact@v4
         with:
           name: nomad-driver-tart-${{ github.sha }}

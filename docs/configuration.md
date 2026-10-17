@@ -26,6 +26,31 @@ client {
 ```
 
 
+## Driver Version and Scheduling Constraints
+
+The driver publishes two distinct node attributes, visible in Nomad's driver details:
+
+- `driver.tart.version`: installed Tart CLI version.
+- `driver.tart.plugin.version`: this Nomad driver plugin's build version, also returned in plugin metadata.
+
+Target a plugin release using a job constraint:
+
+```hcl
+constraint {
+  attribute = "${attr.driver.tart.plugin.version}"
+  operator  = "semver"
+  value     = ">= 2.0.0"
+}
+```
+
+GoReleaser embeds the release version. `make build` and `mise run build` derive it
+from Git tags (including commit/dirty suffixes); override with `make build VERSION=2.0.0`.
+Plain `go build` uses `0.0.0-dev`. Development and snapshot versions are prereleases;
+use an exact `=` constraint when targeting a specific development build.
+After deploying the binary, restart the plugin/client through your normal upgrade
+procedure for the new fingerprint attribute to appear. Existing binaries do not
+publish this attribute and will not satisfy the constraint.
+
 ## Task Config (job spec `config { ... }`)
 
 The following parameters go under the task’s driver config block `task { driver = "tart"; config { ... } }`.

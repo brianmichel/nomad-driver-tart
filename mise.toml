@@ -3,7 +3,7 @@ go = "1.25.8"
 
 [tasks]
 # Build the Nomad Tart driver plugin
-build = "go build -o dist/nomad-driver-tart main.go"
+build = "make build"
 
 # Clean up build artifacts
 clean = "rm -f dist/nomad-driver-tart"

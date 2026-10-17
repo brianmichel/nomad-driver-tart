@@ -24,12 +24,15 @@ const (
 	taskHandleVersion = 1
 )
 
+// Version is set at build time with -ldflags -X; unversioned builds are development builds.
+var Version = "0.0.0-dev"
+
 var (
 	// pluginInfo is the response returned for the PluginInfo RPC
 	pluginInfo = &base.PluginInfoResponse{
 		Type:              base.PluginTypeDriver,
 		PluginApiVersions: []string{drivers.ApiVersion010},
-		PluginVersion:     "0.2.0",
+		PluginVersion:     Version,
 		Name:              pluginName,
 	}
 

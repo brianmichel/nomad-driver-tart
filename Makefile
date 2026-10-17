@@ -1,10 +1,12 @@
 GOBINARY=go
 BINARY_NAME=dist/nomad-driver-tart
+VERSION ?= $(shell git describe --tags --dirty 2>/dev/null || echo 0.0.0-dev)
+LDFLAGS = -X github.com/brianmichel/nomad-driver-tart/driver.Version=$(patsubst v%,%,$(VERSION))
 
 .PHONY: build
 build:
 	@echo "Building Nomad Tart driver plugin..."
-	@$(GOBINARY) build -o $(BINARY_NAME) main.go
+	@$(GOBINARY) build -ldflags "$(LDFLAGS)" -o $(BINARY_NAME) main.go
 	@echo "Build complete: $(BINARY_NAME)"
 
 .PHONY: clean

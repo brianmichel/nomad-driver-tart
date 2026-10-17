@@ -9,7 +9,7 @@ builds:
       - arm64
     env:
       - CGO_ENABLED=0
-    ldflags: -s -w
+    ldflags: -s -w -X github.com/brianmichel/nomad-driver-tart/driver.Version={{ .Version }}
     hooks:
       post:
         - sh codesign.sh "Developer ID Application" dist
@@ -40,4 +40,4 @@ release:
     name: nomad-driver-tart
 
 snapshot:
-  version_template: "{{ .ProjectName }}-SNAPSHOT-{{ .ShortCommit }}"
+  version_template: "{{ .Version }}-dev-{{ .ShortCommit }}"
