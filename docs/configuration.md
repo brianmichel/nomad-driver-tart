@@ -141,12 +141,16 @@ variables to host paths before passing them to Tart:
 
 ## VM Resources (CPU, Memory)
 
-VM CPU and memory size are derived from the Nomad `resources` block:
+Request CPU and memory in the Nomad `resources` block:
 
-- `cores` (int): Number of CPU cores given to the VM.
-- `memory` (MB): Memory assigned to the VM.
+- `cores` (int): Requested cores; not yet a reliable guarantee of guest sizing.
+- `memory` (MB): Requested memory; not yet a reliable guarantee of guest sizing.
 
-The driver configures these via `tart set --cpu <cores> --memory <MB>` during setup.
+The current implementation defaults to 4 cores and 4096 MB when Linux resource
+data is absent. When present, it counts comma-separated cpuset entries (not CPU
+ranges) and reads the Linux memory limit. This may differ from the request on
+macOS; `cpu` shares are not converted to cores. Resource mapping fixes and
+real-host validation are pending. Inspect actual VM sizing before relying on it.
 
 Example:
 
@@ -172,7 +176,7 @@ How to use inside the VM:
 
 Modes mapped to Tart flags:
 - `shared`/`nat`/`default` (default): NAT; no special flags.
-- `host`: Adds `--net-host` (VM shares host’s network namespace characteristics).
+- `host`: Adds `--net-host`; verify its exact behavior for the installed Tart version.
 - `bridged`: Adds `--net-bridged <interface>`; requires `bridged_interface`.
 - `softnet`: Adds `--net-softnet` plus optional `--net-softnet-allow <cidrs>` and `--net-softnet-expose <ports>`.
 
@@ -180,7 +184,7 @@ Softnet port mappings:
 - `softnet_expose = ["2222:22", "8080:80"]` makes the VM’s internal ports reachable from the host network at the listed external ports.
 - Inside the VM: services listen on their normal internal ports; no changes needed.
 
-Reference: driver/networking.go:1-63, driver/config.go:37-52
+Reference: `driver/config_network.go` and `driver/tart_client_registry.go`.
 
 
 ## Access from Inside the VM
@@ -217,9 +221,11 @@ job "macos-sequoia-vanilla" {
 
       template {
         data        = <<EOH
-SSH_PASSWORD={{ with nomadVar "nomad/jobs/macos-sequoia-vanilla" }}{{ .ssh_password }}{{ end }}
+SSH_PASSWORD={{ with nomadVar "nomad/jobs/macos-sequoia-vanilla" }}{{ .ssh_password | toJSON }}{{ end }}
 EOH
         destination = "secrets/secrets.env"
+        perms = "0600"
+        error_on_missing_key = true
         env         = true
       }
 
