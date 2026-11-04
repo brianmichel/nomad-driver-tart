@@ -140,7 +140,9 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		Nomad:  cfg,
 	}
 	vmConfig.Driver.Directories = resolveDirectoryMounts(cfg, vmConfig.Driver.Directories)
-	d.logger.Info("starting tart task", "task_cfg", hclog.Fmt("%+v", vmConfig.Driver))
+	d.logger.Info("starting tart task",
+		"task_id", cfg.ID, "task_name", cfg.Name, "alloc_id", cfg.AllocID,
+		"pull_only", taskConfig.PullOnly)
 	if exposures := nomadPortExposures(cfg); len(exposures) > 0 {
 		d.logger.Debug("found Nomad allocated port mappings for Tart networking", "ports", hclog.Fmt("%+v", exposures))
 	}
