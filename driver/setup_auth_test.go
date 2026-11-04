@@ -43,35 +43,13 @@ func TestSetup_UsesTaskAuthAndEnv(t *testing.T) {
 		t.Fatalf("Setup returned error: %v", err)
 	}
 
-	var loginIdx, cloneIdx int
-	foundLogin := false
-	for i, call := range runner.calls {
-		if call.Name == "tart" && len(call.Args) > 0 {
-			if call.Args[0] == "login" {
-				loginIdx = i
-				foundLogin = true
-			}
-			if call.Args[0] == "clone" {
-				cloneIdx = i
-			}
+	for _, call := range runner.calls {
+		if call.Name == "tart" && len(call.Args) > 0 && call.Args[0] == "login" {
+			t.Fatal("task auth must not invoke tart login")
 		}
 	}
-	if !foundLogin {
-		t.Fatalf("expected a login invocation, got %v", runner.calls)
-	}
-	loginArgs := runner.calls[loginIdx].Args
-	foundUser := false
-	for i := 0; i < len(loginArgs)-1; i++ {
-		if loginArgs[i] == "--username" && loginArgs[i+1] == "user1" {
-			foundUser = true
-			break
-		}
-	}
-	if !foundUser {
-		t.Fatalf("--username user1 not found in login args: %v", loginArgs)
-	}
-	if cloneIdx == 0 && len(runner.calls) < 2 {
-		t.Fatalf("expected a clone invocation, got %v", runner.calls)
+	if len(runner.calls) == 0 || runner.calls[0].Args[0] != "clone" {
+		t.Fatal("expected clone invocation")
 	}
 }
 

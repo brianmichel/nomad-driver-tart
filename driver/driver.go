@@ -47,6 +47,8 @@ var (
 
 // Driver is a driver for running Tart VM containers
 type Driver struct {
+	executorFactory taskExecutorFactory
+
 	// eventer is used to handle multiplexing of TaskEvents calls such that an
 	// event can be broadcast to all callers
 	eventer *eventer.Eventer
