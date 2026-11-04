@@ -2,8 +2,6 @@ module github.com/brianmichel/nomad-driver-tart
 
 go 1.27.2
 
-replace github.com/opencontainers/runc => github.com/opencontainers/runc v1.1.9
-
 require (
 	github.com/hashicorp/go-hclog v1.6.3
 	github.com/hashicorp/go-plugin v1.7.0
@@ -26,7 +24,7 @@ require (
 	github.com/armon/go-radix v1.0.0 // indirect
 	github.com/bgentry/speakeasy v0.2.0 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
-	github.com/checkpoint-restore/go-criu/v5 v5.3.0 // indirect
+	github.com/checkpoint-restore/go-criu/v7 v7.2.0 // indirect
 	github.com/cilium/ebpf v0.18.0 // indirect
 	github.com/container-storage-interface/spec v1.12.0 // indirect
 	github.com/containerd/console v1.0.5 // indirect
@@ -108,6 +106,7 @@ require (
 	github.com/moby/sys/capability v0.4.0 // indirect
 	github.com/moby/sys/mount v0.3.4 // indirect
 	github.com/moby/sys/mountinfo v0.7.2 // indirect
+	github.com/moby/sys/user v0.4.0 // indirect
 	github.com/moby/sys/userns v0.1.0 // indirect
 	github.com/mrunalp/fileutils v0.5.1 // indirect
 	github.com/oklog/run v1.1.0 // indirect
@@ -133,7 +132,6 @@ require (
 	github.com/spf13/cast v1.9.2 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
 	github.com/stretchr/testify v1.11.1 // indirect
-	github.com/syndtr/gocapability v0.0.0-20200815063812-42c35b437635 // indirect
 	github.com/tklauser/go-sysconf v0.3.15 // indirect
 	github.com/tklauser/numcpus v0.10.0 // indirect
 	github.com/vishvananda/netlink v1.3.1 // indirect
