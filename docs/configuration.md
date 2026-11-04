@@ -71,7 +71,20 @@ The following parameters go under the task’s driver config block `task { drive
   - Applied via `tart set --disk-size` during setup.
 
 - `auth { username, password }` (block, optional): Credentials for private image registries.
-  - If set, driver runs `tart login <registry> --username <u> --password-stdin` prior to clone.
+  - Both values are required when explicit auth is supplied. Credentials are scoped
+    to each clone/pull invocation using Tart's `TART_REGISTRY_HOSTNAME`,
+    `TART_REGISTRY_USERNAME` and `TART_REGISTRY_PASSWORD` provider; the driver does
+    not run `tart login` or persist task credentials in Keychain.
+  - Explicit task auth replaces conflicting inherited provider variables. Without
+    it, clone retains existing provider behavior; pull-only tasks retain their
+    original task environment, without newly importing driver-host registry credentials.
+  - Host case preservation and numeric-port normalization follow pinned Tart
+    2.41.1 source/tests; the image reference/tag/digest passed to Tart is unchanged.
+    Unsupported or ambiguous authorities fail before invocation.
+  - Credentials remain sensitive in task config/state, environments and executor
+    memory. Local slice clearing is not secure erasure or tenant isolation. Actual
+    Apple Silicon/Tart/Nomad RPC, concurrent registry and Keychain qualification
+    remain pending; portable fake-executor tests do not replace them.
 
 - `network { ... }` (block, optional): VM networking mode and Softnet options.
   - `mode` (string): One of `shared` (default NAT), `host`, `bridged`, or `softnet`.

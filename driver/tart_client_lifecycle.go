@@ -21,6 +21,7 @@ func (c *tartCLI) Setup(ctx context.Context, config VMConfig) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	defer clear(env)
 
 	vmName := vmName(config.Nomad.AllocID)
 	url := config.Driver.URL
@@ -44,8 +45,8 @@ func (c *tartCLI) Setup(ctx context.Context, config VMConfig) (string, error) {
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("failed to create VM %s from URL %s: %v (stderr: %s)",
-			vmName, url, err, stderr.String())
+		// Tart or a credential provider can echo secrets in diagnostics.
+		return "", fmt.Errorf("failed to create VM from image: %w", err)
 	}
 
 	if err := c.SetVMResources(ctx, vmName, cpuCores, memoryMB, diskGB); err != nil {

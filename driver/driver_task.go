@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/go-hclog"
@@ -13,7 +14,12 @@ import (
 	"github.com/hashicorp/nomad/plugins/drivers"
 )
 
+type taskExecutorFactory func(*drivers.TaskConfig, *drivers.TaskHandle) (executor.Executor, *plugin.Client, error)
+
 func (d *Driver) createExecutor(cfg *drivers.TaskConfig, handle *drivers.TaskHandle) (executor.Executor, *plugin.Client, error) {
+	if d.executorFactory != nil {
+		return d.executorFactory(cfg, handle)
+	}
 	pluginLogFile := filepath.Join(cfg.TaskDir().Dir, "executor.out")
 	execConfig := &executor.ExecutorConfig{
 		LogFile:  pluginLogFile,
@@ -61,8 +67,29 @@ func (d *Driver) emitTaskEvent(cfg *drivers.TaskConfig, msg string, annotations 
 func (d *Driver) startPullOnlyTask(cfg *drivers.TaskConfig, vmConfig VMConfig, handle *drivers.TaskHandle) (*drivers.TaskHandle, *drivers.DriverNetwork, error) {
 	d.logger.Info("starting tart pull-only task", "url", vmConfig.Driver.URL)
 
-	if _, err := d.client.PrepareRegistryEnv(d.ctx, vmConfig); err != nil {
+	registryEnv, err := d.client.PrepareRegistryEnv(d.ctx, vmConfig)
+	if err != nil {
 		return nil, nil, fmt.Errorf("failed to prepare registry env: %w", err)
+	}
+	defer clear(registryEnv)
+	pullEnv := tartEnvList(cfg)
+	defer func() { clear(pullEnv) }()
+	// Keep the executor's task environment and PATH policy, forwarding only
+	// the registry provider variables from the prepared clone environment.
+	if vmConfig.Driver.Auth.IsValid() {
+		for _, entry := range registryEnv {
+			key, _, _ := strings.Cut(entry, "=")
+			if key != "TART_REGISTRY_HOSTNAME" && key != "TART_REGISTRY_USERNAME" && key != "TART_REGISTRY_PASSWORD" {
+				continue
+			}
+			filtered := pullEnv[:0]
+			for _, current := range pullEnv {
+				if !strings.HasPrefix(current, key+"=") {
+					filtered = append(filtered, current)
+				}
+			}
+			pullEnv = append(filtered, entry)
+		}
 	}
 
 	d.emitTaskEvent(cfg, "Pulling VM image", map[string]string{
@@ -77,7 +104,7 @@ func (d *Driver) startPullOnlyTask(cfg *drivers.TaskConfig, vmConfig VMConfig, h
 	execCmd := &executor.ExecCommand{
 		Cmd:              "tart",
 		Args:             d.client.BuildPullArgs(vmConfig),
-		Env:              tartEnvList(cfg),
+		Env:              pullEnv,
 		User:             cfg.User,
 		TaskDir:          cfg.TaskDir().Dir,
 		StdoutPath:       cfg.StdoutPath,

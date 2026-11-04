@@ -1,46 +1,55 @@
 package driver
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"net/url"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 )
 
-// PrepareRegistryEnv builds the environment slice passed to tart commands
-// and performs a `tart login` against the target registry when task-level
-// auth credentials are configured. The resulting environment is suitable for
-// reuse across subsequent tart invocations (clone, pull, etc.).
+var registryAuthorityPattern = regexp.MustCompile(`^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*(?:\.[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*)*(?::[0-9]+)?$`)
+
+// PrepareRegistryEnv scopes explicit credentials to this command's registry.
+// Never mutate process environment or persist task credentials in Keychain.
 func (c *tartCLI) PrepareRegistryEnv(ctx context.Context, config VMConfig) ([]string, error) {
 	env := os.Environ()
 	if config.Nomad != nil {
 		env = append(env, config.Nomad.EnvList()...)
 	}
 
-	if !config.Driver.Auth.IsValid() {
-		c.logger.Trace("Auth not provided; relying on env vars for registry access")
+	auth := config.Driver.Auth
+	if auth.Username == "" && auth.Password == "" {
 		return env, nil
 	}
-
-	host, err := registryHost(config.Driver.URL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse URL: %w", err)
+	if !auth.IsValid() {
+		return nil, fmt.Errorf("registry auth requires both username and password")
 	}
-
-	loginCmd := c.runner.Run(ctx, "tart", "login", host, "--username", config.Driver.Auth.Username, "--password-stdin")
-	loginCmd.Stdin = strings.NewReader(config.Driver.Auth.Password)
-	loginCmd.Env = env
-
-	var stderr bytes.Buffer
-	loginCmd.Stderr = &stderr
-
-	if err := loginCmd.Run(); err != nil {
-		return nil, fmt.Errorf("failed to login to container registry: %w (stderr: %s)", err, stderr.String())
+	// Tart's Reference.g4 host grammar permits ASCII alphanumeric labels
+	// separated by dots and single hyphens. Reject ambiguous authorities.
+	authority, _, hasPath := strings.Cut(config.Driver.URL, "/")
+	if !hasPath || !registryAuthorityPattern.MatchString(authority) {
+		return nil, fmt.Errorf("registry reference has an unsupported hostname")
 	}
-
-	return env, nil
+	host, port, hasPort := strings.Cut(authority, ":")
+	if hasPort {
+		n, err := strconv.Atoi(strings.TrimLeft(port, "0"))
+		if err != nil || n < 1 || n > 65535 {
+			return nil, fmt.Errorf("registry reference has an unsupported port")
+		}
+		host += ":" + strconv.Itoa(n)
+	}
+	filtered := env[:0]
+	for _, entry := range env {
+		key, _, _ := strings.Cut(entry, "=")
+		if key != "TART_REGISTRY_HOSTNAME" && key != "TART_REGISTRY_USERNAME" && key != "TART_REGISTRY_PASSWORD" {
+			filtered = append(filtered, entry)
+		}
+	}
+	return append(filtered, "TART_REGISTRY_HOSTNAME="+host,
+		"TART_REGISTRY_USERNAME="+auth.Username, "TART_REGISTRY_PASSWORD="+auth.Password), nil
 }
 
 // BuildPullArgs returns the tart CLI args used to prefetch an image into
