@@ -273,6 +273,24 @@ EOH
 ```
 
 
+## Driver Diagnostics and Secret Handling
+
+The driver logs task/allocation identity and whether a task is a prefetch instead
+of dumping its decoded configuration. Startup diagnostics report lifecycle
+messages and exit codes; they deliberately omit the command, arguments, and raw
+backend error text because those strings can contain credentials. Startup failure
+events use `error_kind = "execution_failed"`. Scripts consuming the former
+`command` or `error` event annotations must use task identity and lifecycle status
+instead. Command execution and stdout/stderr streaming are unchanged.
+
+This is not a general-purpose log scrubber: guest stdout/stderr, arbitrary image
+references, upstream Nomad/executor diagnostics, and errors returned through RPCs
+are not automatically sanitized. Do not put secrets in image references or command
+arguments when a protected secrets file can be used, and control access to task
+logs and agent diagnostics. If an older driver logged credential-bearing task
+configuration, review retained agent logs and rotate exposed credentials under
+your incident-response policy.
+
 ## Notes and Limitations
 
 - Images are cloned on first use; large images take time. Update and progress deadlines in your job’s `update { }` block accordingly.

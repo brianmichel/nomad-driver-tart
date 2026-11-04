@@ -3,10 +3,8 @@ package driver
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/hashicorp/nomad/plugins/drivers"
@@ -79,20 +77,12 @@ func (d *Driver) executeStartupCommand(
 		return
 	}
 
-	commandStr := fullCmd[0]
-	if len(fullCmd) > 1 {
-		commandStr = fmt.Sprintf("%s %s", fullCmd[0], strings.Join(fullCmd[1:], " "))
-	}
-
 	d.eventer.EmitEvent(&drivers.TaskEvent{
 		TaskID:    taskID,
 		TaskName:  taskName,
 		AllocID:   allocID,
 		Timestamp: time.Now(),
 		Message:   "Running startup command",
-		Annotations: map[string]string{
-			"command": commandStr,
-		},
 	})
 
 	backoff := 1 * time.Second
@@ -121,7 +111,6 @@ func (d *Driver) executeStartupCommand(
 				Timestamp: time.Now(),
 				Message:   "Startup command completed",
 				Annotations: map[string]string{
-					"command":   commandStr,
 					"exit_code": strconv.Itoa(exitCode),
 				},
 			})
@@ -136,7 +125,8 @@ func (d *Driver) executeStartupCommand(
 		}
 
 		if errors.Is(err, errVMIPUnavailable) || errors.Is(err, errSSHDialFailed) || errors.Is(err, errSSHSessionFailed) {
-			d.logger.Debug("Startup command SSH not ready; retrying", "command", commandStr, "error", err)
+			d.logger.Debug("Startup command SSH not ready; retrying",
+				"task_id", taskID, "task_name", taskName, "alloc_id", allocID)
 			time.Sleep(backoff)
 			if backoff < maxBackoff {
 				backoff *= 2
@@ -154,8 +144,8 @@ func (d *Driver) executeStartupCommand(
 			Timestamp: time.Now(),
 			Message:   "Startup command failed",
 			Annotations: map[string]string{
-				"command": commandStr,
-				"error":   err.Error(),
+				// Backend errors can echo command arguments or credentials.
+				"error_kind": "execution_failed",
 			},
 		})
 		return
