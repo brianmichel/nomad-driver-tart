@@ -20,7 +20,12 @@ func TestStopTaskDeletesVM(t *testing.T) {
 	close(doneCh)
 
 	allocID := "alloc-stop"
+	owner, err := newVMOwnership(&drivers.TaskConfig{ID: "task-stop", Name: "test-stop", AllocID: allocID}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
 	drv.tasks.Set("task-stop", &taskHandle{
+		ownership: owner,
 		taskConfig: &drivers.TaskConfig{
 			ID:      "task-stop",
 			Name:    "test-stop",
@@ -123,7 +128,12 @@ func TestDestroyTaskDeletesVM(t *testing.T) {
 	drv.client = mock
 
 	allocID := "alloc-abc"
+	owner, err := newVMOwnership(&drivers.TaskConfig{ID: "task-123", Name: "test", AllocID: allocID}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
 	drv.tasks.Set("task-123", &taskHandle{
+		ownership: owner,
 		taskConfig: &drivers.TaskConfig{
 			ID:      "task-123",
 			Name:    "test",

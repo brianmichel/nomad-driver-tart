@@ -15,14 +15,58 @@ import (
 
 // taskStore is an in-memory datastore for taskHandles
 type taskStore struct {
-	store map[string]*taskHandle
-	lock  sync.RWMutex
+	store        map[string]*taskHandle
+	reservations map[string]*vmReservation
+	lock         sync.RWMutex
 }
 
 // newTaskStore returns a new task store
 func newTaskStore() *taskStore {
 	return &taskStore{
-		store: map[string]*taskHandle{},
+		store:        map[string]*taskHandle{},
+		reservations: map[string]*vmReservation{},
+	}
+}
+
+// vmReservation identifies one acquisition even if its task ID is reused.
+type vmReservation struct {
+	owner vmOwnership
+}
+
+// reserveOwnership claims a task and its VM before any VM operation.
+func (ts *taskStore) reserveOwnership(id string, owner vmOwnership) *vmReservation {
+	ts.lock.Lock()
+	defer ts.lock.Unlock()
+	if id == "" || owner.TaskID != id {
+		return nil
+	}
+	if _, ok := ts.store[id]; ok {
+		return nil
+	}
+	if _, ok := ts.reservations[id]; ok {
+		return nil
+	}
+	if owner.VMName != "" {
+		for _, claim := range ts.reservations {
+			if claim.owner.VMName == owner.VMName {
+				return nil
+			}
+		}
+		for _, handle := range ts.store {
+			if handle != nil && handle.ownership.VMName == owner.VMName {
+				return nil
+			}
+		}
+	}
+	claim := &vmReservation{owner: owner}
+	ts.reservations[id] = claim
+	return claim
+}
+func (ts *taskStore) releaseReservation(id string, claim *vmReservation) {
+	ts.lock.Lock()
+	defer ts.lock.Unlock()
+	if _, stored := ts.store[id]; !stored && claim != nil && ts.reservations[id] == claim {
+		delete(ts.reservations, id)
 	}
 }
 
@@ -41,15 +85,24 @@ func (ts *taskStore) Get(id string) (*taskHandle, bool) {
 	return handle, ok
 }
 
-// Delete removes a task handle
-func (ts *taskStore) Delete(id string) {
+// Delete removes only the specified handle and its reservation.
+func (ts *taskStore) Delete(id string, handle *taskHandle) {
 	ts.lock.Lock()
 	defer ts.lock.Unlock()
+	if current, ok := ts.store[id]; !ok || current != handle {
+		return
+	}
 	delete(ts.store, id)
+	delete(ts.reservations, id)
 }
 
 // taskHandle is a handle to a running task
 type taskHandle struct {
+	// Serializes lifecycle operations without holding stateLock across I/O.
+	lifecycleLock sync.Mutex
+	// Immutable task/allocation ownership copied from versioned driver state.
+	ownership vmOwnership
+
 	// stateLock syncs access to all fields below
 	stateLock sync.RWMutex
 
@@ -116,8 +169,8 @@ func (h *taskHandle) TaskStatus() *drivers.TaskStatus {
 		ExitResult:      exitResult,
 		NetworkOverride: h.networkOverride.Copy(),
 		DriverAttributes: map[string]string{
-			// No custom attributes for now, but something like the task PID could be useful.
-			"pid": strconv.Itoa(h.pid),
+			"pid":     strconv.Itoa(h.pid),
+			"vm_name": h.ownership.VMName,
 		},
 	}
 

@@ -15,7 +15,7 @@ import (
 func (d *Driver) waitForIPAddress(ctx context.Context, vmConfig VMConfig) (string, error) {
 	backoff := 1 * time.Second
 	maxBackoff := 10 * time.Second
-	name := vmName(vmConfig.Nomad.AllocID)
+	name := vmConfig.vmName()
 
 	for {
 		ip, err := d.client.IPAddress(ctx, name, vmConfig.Driver.Network)

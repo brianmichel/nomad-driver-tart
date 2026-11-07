@@ -32,13 +32,13 @@ func TestTaskStoreSetGetDelete(t *testing.T) {
 	}
 
 	// Test Delete
-	ts.Delete("test1")
+	ts.Delete("test1", h2)
 	if _, ok := ts.Get("test1"); ok {
 		t.Fatalf("expected entry to be deleted")
 	}
 
 	// Test Delete non-existent key (should not panic)
-	ts.Delete("nonexistent")
+	ts.Delete("nonexistent", nil)
 }
 
 func TestTaskStoreConcurrentAccess(t *testing.T) {
@@ -98,7 +98,8 @@ func TestTaskStoreConcurrentAccess(t *testing.T) {
 		wg.Add(1)
 		go func(k string) {
 			defer wg.Done()
-			ts.Delete(k)
+			h, _ := ts.Get(k)
+			ts.Delete(k, h)
 		}(key)
 	}
 
@@ -142,7 +143,7 @@ func TestTaskStoreNilHandle(t *testing.T) {
 	}
 
 	// Test deleting nil handle
-	ts.Delete("nil-handle")
+	ts.Delete("nil-handle", nil)
 	if _, ok := ts.Get("nil-handle"); ok {
 		t.Error("expected nil handle to be deleted")
 	}

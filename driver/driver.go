@@ -21,7 +21,7 @@ const (
 
 	// taskHandleVersion is the version of task handle which this driver sets
 	// and understands how to decode driver state
-	taskHandleVersion = 1
+	taskHandleVersion = 2
 )
 
 // Version is set at build time with -ldflags -X; unversioned builds are development builds.
@@ -79,6 +79,8 @@ type Driver struct {
 // StartTask. This information is needed to rebuild the task state and handler
 // during recovery.
 type driverState struct {
+	VMOwnership vmOwnership
+
 	TaskConfig  *drivers.TaskConfig
 	StartedAt   time.Time
 	CompletedAt time.Time

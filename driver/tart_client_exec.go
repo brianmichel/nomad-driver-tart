@@ -25,7 +25,7 @@ func (c *tartCLI) Exec(ctx context.Context, config VMConfig, opts ExecOptions) (
 		return -1, errors.New("command is required but was empty")
 	}
 
-	vmName := vmName(config.Nomad.AllocID)
+	vmName := config.vmName()
 
 	ip, err := c.IPAddress(ctx, vmName, config.Driver.Network)
 	if err != nil || ip == "" {

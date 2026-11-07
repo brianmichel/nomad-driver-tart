@@ -27,6 +27,9 @@ type VMInfo struct {
 }
 
 type VMConfig struct {
+	// Set only by the driver from persisted, validated ownership; never job HCL.
+	ownership vmOwnership
+
 	// The configuration that is custom to our custom driver
 	Driver TaskConfig
 	// The configuration that is shared with Nomad

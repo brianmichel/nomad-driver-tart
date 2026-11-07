@@ -22,7 +22,7 @@ func (c *tartCLI) Setup(ctx context.Context, config VMConfig) (string, error) {
 		return "", err
 	}
 
-	vmName := vmName(config.Nomad.AllocID)
+	vmName := config.vmName()
 	url := config.Driver.URL
 
 	c.logger.Trace("Setting up Tart VM", "name", vmName, "url", url)

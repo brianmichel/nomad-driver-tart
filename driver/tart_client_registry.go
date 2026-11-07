@@ -53,7 +53,7 @@ func (c *tartCLI) BuildPullArgs(config VMConfig) []string {
 // VM based on the provided configuration. This centralizes tart-specific flag
 // construction away from the driver.
 func (c *tartCLI) BuildStartArgs(config VMConfig) ([]string, error) {
-	vmName := vmName(config.Nomad.AllocID)
+	vmName := config.vmName()
 
 	args := []string{"run", vmName}
 	if !config.Driver.ShowUI {
