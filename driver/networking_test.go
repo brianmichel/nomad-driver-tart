@@ -125,3 +125,74 @@ func TestBuildTartNetworkArgs_Conflicts(t *testing.T) {
 		}
 	}
 }
+
+func TestImpliedSoftnetForwardsAllocatedPorts(t *testing.T) {
+	for _, cfg := range []*NetworkConfig{{SoftnetAllow: []string{"10.0.0.0/8"}}, {SoftnetExpose: []string{"2222:22"}}} {
+		got := appendNomadPortExposures(cfg, []nomadPortExposure{{HostPort: 21043, GuestPort: 8000}})
+		if !slices.Contains(got.SoftnetExpose, "21043:8000") {
+			t.Fatalf("allocated forward missing: %#v", got)
+		}
+	}
+}
+
+func TestBuildTartNetworkArgsRejectsOrphanBridgedInterface(t *testing.T) {
+	for _, mode := range []string{"", "shared", "nat", "default"} {
+		if _, err := buildTartNetworkArgs(&NetworkConfig{Mode: mode, BridgedInterface: "en0"}); err == nil {
+			t.Errorf("mode %q silently ignores bridged interface", mode)
+		}
+	}
+}
+
+func TestSoftnetAllocatedBindingValidation(t *testing.T) {
+	for _, tc := range []struct {
+		mode, ip string
+		allow    bool
+		wantErr  bool
+	}{
+		{"softnet", "", false, false}, {"softnet", "0.0.0.0", false, false},
+		{"softnet", "127.0.0.1", false, true}, {"", "192.0.2.1", true, true},
+		{"softnet", "::", false, true}, {"shared", "192.0.2.1", false, false},
+	} {
+		cfg := &NetworkConfig{Mode: tc.mode}
+		if tc.allow {
+			cfg.SoftnetAllow = []string{"10.0.0.0/8"}
+		}
+		err := validateNetworkConfig(cfg, []nomadPortExposure{{Label: "http", HostPort: 21043, GuestPort: 8000, HostIP: tc.ip}})
+		if (err != nil) != tc.wantErr {
+			t.Errorf("mode %q ip %q allow %v: %v", tc.mode, tc.ip, tc.allow, err)
+		}
+	}
+}
+
+func TestImpliedSoftnetDefaultAliasesDeduplicateAllocatedPorts(t *testing.T) {
+	for _, mode := range []string{"", "shared", "nat", "default"} {
+		cfg := &NetworkConfig{Mode: mode, SoftnetExpose: []string{"21043:8000"}}
+		got := appendNomadPortExposures(cfg, []nomadPortExposure{{HostPort: 21043, GuestPort: 8000}, {HostPort: 22000, GuestPort: 22000}})
+		if !slices.Equal(got.SoftnetExpose, []string{"21043:8000", "22000:22000"}) {
+			t.Fatalf("mode %q: %v", mode, got.SoftnetExpose)
+		}
+	}
+}
+
+func TestSoftnetForwardConflictValidation(t *testing.T) {
+	cases := []struct {
+		name     string
+		cfg      *NetworkConfig
+		ports    []nomadPortExposure
+		conflict bool
+	}{
+		{"comma separated", &NetworkConfig{Mode: "softnet", SoftnetExpose: []string{"1234:80,21043:22"}}, []nomadPortExposure{{HostPort: 21043, GuestPort: 8000}}, true},
+		{"leading zero numeric pair", &NetworkConfig{Mode: "softnet", SoftnetExpose: []string{"021043:22"}}, []nomadPortExposure{{HostPort: 21043, GuestPort: 8000}}, true},
+		{"identical allocations", &NetworkConfig{Mode: "softnet", SoftnetExpose: []string{"21043:8000"}}, []nomadPortExposure{{HostPort: 21043, GuestPort: 8000}, {HostPort: 21043, GuestPort: 8000}}, false},
+		{"distinct ports", &NetworkConfig{Mode: "softnet", SoftnetExpose: []string{"1234:22"}}, []nomadPortExposure{{HostPort: 21043, GuestPort: 8000}}, false},
+		{"non softnet allocations", &NetworkConfig{Mode: "shared"}, []nomadPortExposure{{HostPort: 21043, GuestPort: 22}, {HostPort: 21043, GuestPort: 8000}}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateNetworkConfig(tc.cfg, tc.ports)
+			if (err != nil) != tc.conflict {
+				t.Fatalf("conflict=%v, got %v", tc.conflict, err)
+			}
+		})
+	}
+}

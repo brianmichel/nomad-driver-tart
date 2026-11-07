@@ -172,15 +172,15 @@ How to use inside the VM:
 
 Modes mapped to Tart flags:
 - `shared`/`nat`/`default` (default): NAT; no special flags.
-- `host`: Adds `--net-host` (VM shares host’s network namespace characteristics).
+- `host`: Adds `--net-host`, Tart's host-only network; it does **not** share the host network namespace.
 - `bridged`: Adds `--net-bridged <interface>`; requires `bridged_interface`.
-- `softnet`: Adds `--net-softnet` plus optional `--net-softnet-allow <cidrs>` and `--net-softnet-expose <ports>`.
+- `softnet`: Adds `--net-softnet` plus optional `--net-softnet-allow <cidrs>` and `--net-softnet-expose <ports>`. Allow or expose options also imply Softnet when mode is omitted or a default alias is used.
 
-Softnet port mappings:
-- `softnet_expose = ["2222:22", "8080:80"]` makes the VM’s internal ports reachable from the host network at the listed external ports.
-- Inside the VM: services listen on their normal internal ports; no changes needed.
-
-Reference: driver/networking.go:1-63, driver/config.go:37-52
+Softnet forwarding and service discovery:
+- Tart 2.41.1 specifies `EXTERNAL:INTERNAL` as **TCP** forwarding via an automatically detected host egress interface (which can be Wi-Fi, Ethernet, or VPN). The guest service must listen on `0.0.0.0` or its guest IP. Tart says host-local connections to the forwarded port do not work; Softnet restrictions still apply and may require an allow rule. These are upstream semantics, not local runtime qualification. [Tart Run.swift](https://github.com/openai/tart/blob/2.41.1/Sources/tart/Commands/Run.swift)
+- In explicit or implied Softnet mode the driver adds Nomad allocated port mappings to the explicit expose list, using the allocated port as the guest port when `to` is not set. Conflicting numeric external-to-guest assignments involving an allocated mapping are rejected before VM setup; identical generated pairs are deduplicated against existing entries. Tart's syntax has no host IP selector: a specific allocated `HostIP` is rejected before VM setup instead of silently exposing it on the egress interface. An empty or IPv4 wildcard `0.0.0.0` is accepted, but does not guarantee reachability on all interfaces. Explicit `softnet_expose` entries likewise select no host IP; assess their exposure separately. Other modes do not get automatic forwards.
+- The driver attempts to return the VM IP as a Nomad driver network override, with `AutoAdvertise` false; lookup failure is logged and startup continues without the override. A driver-address registration refers to that guest IP, whereas a forwarded service needs a reachable host address and the allocated external port. Neither address's reachability nor Nomad/Consul registration behavior is guaranteed here. Test both from a separate machine on the target network, including firewall and Softnet policy, before relying on them. Host-local health checks against forwarded ports are not a substitute.
+- Bridge/Softnet IP resolution, failure reporting, and remote service registration remain unqualified on Apple Silicon with pinned versions. Do not assume Docker or Consul Connect semantics.
 
 
 ## Access from Inside the VM

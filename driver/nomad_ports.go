@@ -5,7 +5,7 @@ import (
 )
 
 // nomadPortExposure describes enough of Nomad's allocated port mapping for the
-// Tart driver to build host-to-guest forwarding rules in the future.
+// Tart driver to build Softnet forwarding rules.
 type nomadPortExposure struct {
 	Label     string
 	HostPort  int
@@ -14,8 +14,7 @@ type nomadPortExposure struct {
 }
 
 // nomadPortExposures extracts Nomad's allocated port mappings from the task
-// config. This is the data we would use to derive Tart softnet expose rules
-// with Docker-like UX.
+// config for Softnet expose rules.
 func nomadPortExposures(cfg *drivers.TaskConfig) []nomadPortExposure {
 	if cfg == nil || cfg.Resources == nil || cfg.Resources.Ports == nil {
 		return nil

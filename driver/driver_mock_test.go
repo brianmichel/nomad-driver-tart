@@ -92,6 +92,7 @@ func (m *mockNetworker) IPAddress(context.Context, string, *NetworkConfig) (stri
 }
 
 type mockBuilder struct {
+	probeCalled bool
 	startArgs   []string
 	startErr    error
 	pullArgs    []string
@@ -107,6 +108,7 @@ func (m *mockBuilder) PrepareRegistryEnv(context.Context, VMConfig) ([]string, e
 	return m.registryEnv, m.registryErr
 }
 func (m *mockBuilder) NeedsImageDownload(context.Context, VMConfig) (bool, error) {
+	m.probeCalled = true
 	return m.needsDL, m.needsDLErr
 }
 
