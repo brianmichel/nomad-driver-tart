@@ -18,36 +18,35 @@ This driver allows Nomad to manage the lifecycle of Tart VMs, providing a way to
 
 - Basic task lifecycle management (start, stop, destroy)
 - Task status reporting
-- Signal forwarding to tasks
+- VM stop handling (arbitrary guest signal forwarding is not implemented)
 - Placeholder for resource usage statistics
 - Startup command execution with output streamed to task logs
-- Control VM CPU and memory via Nomad's `resources` block
+- Request VM CPU and memory via Nomad's `resources` block; verify actual sizing (see limitations)
 - Optional VM disk size configuration
- - Networking modes: host-only, bridged, or Softnet with allow/expose
+- Networking modes: host, bridged, or Softnet with allow/expose
 
 ## Requirements
 
-- Go 1.20 or later
-- Nomad 1.6.x or later
-- macOS with Tart installed
+- Go 1.27.2 to build (pinned in `go.mod` and `mise.toml`)
+- Nomad and Tart on Apple Silicon macOS; an exact supported version matrix is not yet qualified
 
 ## Building
 
 To build the driver plugin:
 
 ```bash
-make build
+mise run build
 # Cross compile for Apple Silicon
-GOOS=darwin GOARCH=arm64 make build
+GOOS=darwin GOARCH=arm64 mise run build
 ```
 
-This will create a `nomad-driver-tart` binary in the project root.
+This creates `dist/nomad-driver-tart`. For checks use `mise run vet` and
+`mise run test`; `make test` currently does not run tests.
 
 ## Installation
 
-1. Build the plugin as described above
-2. Place the binary in a directory where Nomad can find it
-3. Configure Nomad to use the plugin (see example configuration below)
+See the [operator runbook](docs/operator-runbook.md) for release assets, Tart's
+tap, verification, installation and operational limitations.
 
 ## Configuration
 
@@ -97,14 +96,15 @@ job "macos-sequoia-vanilla" {
     task "vm" {
       driver = "tart"
 
-      # Setup password with a secure Nomad var
-      # Example:
-      #   nomad var put nomad/jobs/macos-sequoia-vanilla ssh_password="your VM password"
+      # Provision the protected Nomad variable through your approved secure workflow.
+      # Do not place a real password on a command line or in job source.
       template {
         data        = <<EOH
-SSH_PASSWORD={{ with nomadVar "nomad/jobs/macos-sequoia-vanilla" }}{{ .ssh_password }}{{ end }}
+SSH_PASSWORD={{ with nomadVar "nomad/jobs/macos-sequoia-vanilla" }}{{ .ssh_password | toJSON }}{{ end }}
 EOH
         destination = "secrets/file.env"
+        perms = "0600"
+        error_on_missing_key = true
         env         = true
       }
 
@@ -130,8 +130,8 @@ EOH
       }
 
       resources {
-        cpu    = 500   # Number of virtual CPU shares (1 core = 1000)
-        memory = 256  # Memory in MB assigned to the VM
+        cores  = 2     # Request; actual guest sizing needs verification
+        memory = 4096  # Memory in MB requested for the VM
       }
 
       logs {
@@ -148,7 +148,7 @@ EOH
 1. Start the Nomad agent with the plugin:
 
 ```bash
-nomad agent -dev -config=./examples/agent.hcl -plugin-dir=$(pwd)
+nomad agent -dev -config=./examples/agent.hcl -plugin-dir=$(pwd)/dist
 ```
 
 2. In another terminal, run a job that uses the Tart driver:
