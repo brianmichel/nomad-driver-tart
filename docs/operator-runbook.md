@@ -17,10 +17,13 @@ host directory mounts and network modes, and the driver automatically shares the
 task secrets directory with the guest read-only. Read-only does not prevent a
 guest from reading or exfiltrating secrets. Restrict job submission, Nomad ACLs,
 variable paths, access to client hosts and logs, and host filesystem permissions.
-There is no shipped restricted host-access policy; a possible restricted mode is
-pending policy review. The SSH client currently accepts any host key
-(`driver/tart_client_exec.go`); use a trusted isolated network and do not claim SSH
-server identity verification. SSH-trust compatibility decisions remain pending.
+There is no shipped restricted host-access policy yet. The approved direction is
+opt-in restricted mode while preserving trusted single-tenant defaults. The SSH
+client currently accepts any host key (`driver/tart_client_exec.go`); use a trusted
+isolated network and do not claim SSH server identity verification. Restricted
+mode must require pinned SSH host keys; documented trusted-mode compatibility is
+preserved. These [approved decisions](enterprise-policy-decisions.md) are not
+claims of completed implementation or real-host qualification.
 
 Use a dedicated service identity with only the macOS, Tart storage, keychain,
 Nomad plugin and network permissions required for the selected version and
