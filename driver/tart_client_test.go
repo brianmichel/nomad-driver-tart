@@ -2,9 +2,11 @@ package driver
 
 import (
 	"context"
+	"fmt"
 	"os/exec"
 	"reflect"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/go-hclog"
@@ -123,7 +125,7 @@ func TestIPAddressUsesARPResolverForBridgedNetworking(t *testing.T) {
 
 func TestBuildStartArgsAddsSoftnetExposeFromNomadPorts(t *testing.T) {
 	c := &tartCLI{logger: hclog.NewNullLogger(), runner: &recordingRunner{}}
-	ports := structs.AllocatedPorts{{Label: "http", Value: 21043, To: 8000, HostIP: "192.168.1.10"}}
+	ports := structs.AllocatedPorts{{Label: "http", Value: 21043, To: 8000, HostIP: "0.0.0.0"}}
 	cfg := VMConfig{
 		Driver: TaskConfig{
 			Network: &NetworkConfig{Mode: "softnet", SoftnetAllow: []string{"0.0.0.0/0"}},
@@ -145,5 +147,92 @@ func TestBuildStartArgsAddsSoftnetExposeFromNomadPorts(t *testing.T) {
 	}
 	if !slicesContainSequence(args, []string{"--net-softnet", "--net-softnet-allow", "0.0.0.0/0", "--net-softnet-expose", "21043:8000"}) {
 		t.Fatalf("expected softnet expose args in %v", args)
+	}
+}
+
+func TestBuildStartArgsDeduplicatesNumericExplicitForwards(t *testing.T) {
+	for _, mode := range []string{"softnet", "", "default", "shared", "nat"} {
+		for _, explicit := range []string{"1234:80,21043:8000", "021043:08000"} {
+			t.Run("mode="+mode+"/explicit="+explicit, func(t *testing.T) {
+				ports := structs.AllocatedPorts{{Label: "http", Value: 21043, To: 8000}, {Label: "other", Value: 22000, To: 9000}}
+				network := &NetworkConfig{Mode: mode, SoftnetExpose: []string{explicit}}
+				cfg := VMConfig{Driver: TaskConfig{Network: network}, Nomad: &drivers.TaskConfig{AllocID: "a", Resources: &drivers.Resources{Ports: &ports}}}
+				c := &tartCLI{logger: hclog.NewNullLogger(), runner: &recordingRunner{}}
+				args, err := c.BuildStartArgs(cfg)
+				if err != nil {
+					t.Fatalf("BuildStartArgs returned error: %v", err)
+				}
+				if !slicesContainSequence(args, []string{"--net-softnet-expose", explicit + ",22000:9000"}) {
+					t.Fatalf("expected original explicit forward and one distinct allocation, got %v", args)
+				}
+				if !reflect.DeepEqual(network.SoftnetExpose, []string{explicit}) {
+					t.Fatalf("original explicit forwards changed: %v", network.SoftnetExpose)
+				}
+			})
+		}
+	}
+}
+
+func TestBuildStartArgsRejectsSpecificAllocatedHostIP(t *testing.T) {
+	ports := structs.AllocatedPorts{{Label: "http", Value: 21043, To: 8000, HostIP: "127.0.0.1"}}
+	c := &tartCLI{logger: hclog.NewNullLogger(), runner: &recordingRunner{}}
+	_, err := c.BuildStartArgs(VMConfig{Driver: TaskConfig{Network: &NetworkConfig{SoftnetAllow: []string{"10.0.0.0/8"}}}, Nomad: &drivers.TaskConfig{AllocID: "a", Resources: &drivers.Resources{Ports: &ports}}})
+	if err == nil {
+		t.Fatal("expected rejection of unsupported specific host IP")
+	}
+}
+
+func TestStartTaskRejectsUnsupportedHostIPBeforeSetup(t *testing.T) {
+	ports := structs.AllocatedPorts{{Label: "http", Value: 21043, To: 8000, HostIP: "127.0.0.1"}}
+	mock := &testClient{mockLifecycle: mockLifecycle{setupErr: fmt.Errorf("setup reached")}}
+	drv := testDriverWithMock(t, mock)
+	cfg := &drivers.TaskConfig{ID: "task", AllocID: "alloc", Resources: &drivers.Resources{Ports: &ports}}
+	if err := cfg.EncodeConcreteDriverConfig(TaskConfig{SSHUser: "user", SSHPassword: "password", Network: &NetworkConfig{Mode: "softnet"}}); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := drv.StartTask(cfg)
+	if err == nil || !strings.Contains(err.Error(), "host IP") {
+		t.Fatalf("expected host IP validation error, got %v", err)
+	}
+	if mock.setupCalled {
+		t.Fatal("setup ran before network validation")
+	}
+}
+
+func TestStartTaskRejectsConflictingSoftnetForwardsBeforeSetup(t *testing.T) {
+	for _, mode := range []string{"softnet", "", "default", "shared", "nat"} {
+		t.Run("mode="+mode, func(t *testing.T) {
+			ports := structs.AllocatedPorts{{Label: "http", Value: 21043, To: 8000}}
+			mock := &testClient{mockLifecycle: mockLifecycle{setupErr: fmt.Errorf("setup reached")}}
+			drv := testDriverWithMock(t, mock)
+			cfg := &drivers.TaskConfig{ID: "task", AllocID: "alloc", Resources: &drivers.Resources{Ports: &ports}}
+			if err := cfg.EncodeConcreteDriverConfig(TaskConfig{SSHUser: "user", SSHPassword: "password", Network: &NetworkConfig{Mode: mode, SoftnetExpose: []string{"21043:22"}}}); err != nil {
+				t.Fatal(err)
+			}
+			_, _, err := drv.StartTask(cfg)
+			if mock.probeCalled || mock.setupCalled || mock.cloneCalled {
+				t.Errorf("validation occurred after image probe/setup/clone: %+v", mock)
+			}
+			if err == nil || !strings.Contains(err.Error(), "21043") || !strings.Contains(err.Error(), "conflict") {
+				t.Fatalf("expected port conflict, got %v", err)
+			}
+		})
+	}
+}
+
+func TestStartTaskRejectsConflictingAllocatedSoftnetForwardsBeforeSetup(t *testing.T) {
+	ports := structs.AllocatedPorts{{Label: "one", Value: 21043, To: 22}, {Label: "two", Value: 21043, To: 8000}}
+	mock := &testClient{mockLifecycle: mockLifecycle{setupErr: fmt.Errorf("setup reached")}}
+	drv := testDriverWithMock(t, mock)
+	cfg := &drivers.TaskConfig{ID: "task", AllocID: "alloc", Resources: &drivers.Resources{Ports: &ports}}
+	if err := cfg.EncodeConcreteDriverConfig(TaskConfig{SSHUser: "user", SSHPassword: "password", Network: &NetworkConfig{Mode: "softnet"}}); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := drv.StartTask(cfg)
+	if mock.probeCalled || mock.setupCalled || mock.cloneCalled {
+		t.Error("image probe/setup/clone reached")
+	}
+	if err == nil || !strings.Contains(err.Error(), "conflict") {
+		t.Fatalf("expected conflict, got %v", err)
 	}
 }

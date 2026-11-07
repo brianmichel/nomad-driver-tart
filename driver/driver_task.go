@@ -155,6 +155,10 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		return nil, nil, fmt.Errorf("ssh_user and ssh_password are required unless pull_only = true")
 	}
 
+	if err := validateNetworkConfig(taskConfig.Network, nomadPortExposures(cfg)); err != nil {
+		return nil, nil, fmt.Errorf("invalid networking configuration: %w", err)
+	}
+
 	needsDownload, err := d.client.NeedsImageDownload(d.ctx, vmConfig)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to check image availability: %w", err)
