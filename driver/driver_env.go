@@ -1,6 +1,8 @@
 package driver
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"os"
 	"strings"
 
@@ -32,6 +34,31 @@ func tartEnvList(tc *drivers.TaskConfig) []string {
 	return append(list, "PATH="+pathValue)
 }
 
+// taskVMName is opaque, bounded, and unambiguous across allocation/task identities.
+// Allocation-only callers are retained for compatibility with the low-level client;
+// Driver.StartTask requires full task identity for all new VM ownership records.
+func taskVMName(cfg *drivers.TaskConfig) string {
+	if cfg == nil {
+		return ""
+	}
+	if cfg.ID == "" && cfg.Name == "" {
+		return vmName(cfg.AllocID)
+	}
+	digest := sha256.New()
+	for _, part := range []string{cfg.AllocID, cfg.ID, cfg.Name} {
+		fmt.Fprintf(digest, "%d:%s", len(part), part)
+	}
+	return fmt.Sprintf("nomad-%x", digest.Sum(nil))
+}
+
+func (cfg VMConfig) vmName() string {
+	if cfg.ownership != (vmOwnership{}) {
+		return cfg.ownership.VMName
+	}
+	return taskVMName(cfg.Nomad)
+}
+
+// vmName preserves the pre-v2 allocation-only identity for legacy recovery.
 func vmName(allocID string) string {
 	return "nomad-" + allocID
 }

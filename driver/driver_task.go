@@ -92,9 +92,10 @@ func (d *Driver) startPullOnlyTask(cfg *drivers.TaskConfig, vmConfig VMConfig, h
 	}
 
 	state := driverState{
-		TaskConfig: cfg,
-		StartedAt:  time.Now(),
-		PullOnly:   true,
+		VMOwnership: vmConfig.ownership,
+		TaskConfig:  cfg,
+		StartedAt:   time.Now(),
+		PullOnly:    true,
 	}
 	handle.State = drivers.TaskStateRunning
 	if err := handle.SetDriverState(&state); err != nil {
@@ -104,6 +105,7 @@ func (d *Driver) startPullOnlyTask(cfg *drivers.TaskConfig, vmConfig VMConfig, h
 	}
 
 	h := &taskHandle{
+		ownership:    vmConfig.ownership,
 		exec:         execImpl,
 		pluginClient: pluginClient,
 		pid:          ps.Pid,
@@ -123,6 +125,13 @@ func (d *Driver) startPullOnlyTask(cfg *drivers.TaskConfig, vmConfig VMConfig, h
 
 // StartTask returns a task handle and a driver network if necessary.
 func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drivers.DriverNetwork, error) {
+	return d.startTask(cfg, nil)
+}
+
+func (d *Driver) startTask(cfg *drivers.TaskConfig, recovered *vmOwnership) (*drivers.TaskHandle, *drivers.DriverNetwork, error) {
+	if cfg == nil {
+		return nil, nil, fmt.Errorf("task configuration is required")
+	}
 	if _, ok := d.tasks.Get(cfg.ID); ok {
 		return nil, nil, fmt.Errorf("task with ID %q already started", cfg.ID)
 	}
@@ -135,10 +144,26 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	handle := drivers.NewTaskHandle(taskHandleVersion)
 	handle.Config = cfg
 
-	vmConfig := VMConfig{
-		Driver: taskConfig,
-		Nomad:  cfg,
+	owner, err := newVMOwnership(cfg, taskConfig.PullOnly)
+	if err != nil {
+		return nil, nil, err
 	}
+	if recovered != nil {
+		owner = *recovered
+		if err := owner.validate(cfg, cfg.ID, taskConfig.PullOnly); err != nil {
+			return nil, nil, err
+		}
+	}
+	vmConfig := VMConfig{
+		Driver:    taskConfig,
+		Nomad:     cfg,
+		ownership: owner,
+	}
+	claim := d.tasks.reserveOwnership(cfg.ID, owner)
+	if claim == nil {
+		return nil, nil, fmt.Errorf("task or VM identity is already owned")
+	}
+	defer d.tasks.releaseReservation(cfg.ID, claim)
 	vmConfig.Driver.Directories = resolveDirectoryMounts(cfg, vmConfig.Driver.Directories)
 	d.logger.Info("starting tart task",
 		"task_id", cfg.ID, "task_name", cfg.Name, "alloc_id", cfg.AllocID,
@@ -206,8 +231,9 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 
 	// Store the driver state on the handle
 	state := driverState{
-		TaskConfig: cfg,
-		StartedAt:  time.Now(),
+		VMOwnership: vmConfig.ownership,
+		TaskConfig:  cfg,
+		StartedAt:   time.Now(),
 	}
 
 	handle.State = drivers.TaskStateRunning
@@ -225,6 +251,7 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	}
 
 	h := &taskHandle{
+		ownership:       vmConfig.ownership,
 		exec:            execImpl,
 		pluginClient:    pluginClient,
 		pid:             ps.Pid,
@@ -277,7 +304,7 @@ func (d *Driver) RecoverTask(h *drivers.TaskHandle) error {
 		return fmt.Errorf("error: handle cannot be nil")
 	}
 
-	if h.Version != taskHandleVersion {
+	if h.Version != 1 && h.Version != taskHandleVersion {
 		return fmt.Errorf("error: incompatible handle version of %d", h.Version)
 	}
 
@@ -286,9 +313,14 @@ func (d *Driver) RecoverTask(h *drivers.TaskHandle) error {
 		return fmt.Errorf("failed to decode task state from handle: %w", err)
 	}
 
-	// Start the task with the previous configuration.
+	owner, err := decodeVMOwnership(h, taskState)
+	if err != nil {
+		return err
+	}
+	// Recovery reattachment is delivered separately in R03. Until then preserve
+	// the exact legacy/new identity; never silently rename a recovered VM.
 	d.logger.Info("recovered tart task", "task_id", h.Config.ID)
-	_, _, err := d.StartTask(taskState.TaskConfig)
+	_, _, err = d.startTask(taskState.TaskConfig, &owner)
 	if err != nil {
 		return fmt.Errorf("failed to start task: %w", err)
 	}
@@ -314,10 +346,20 @@ func (d *Driver) StopTask(taskID string, timeout time.Duration, signal string) e
 	if !ok {
 		return drivers.ErrTaskNotFound
 	}
+	handle.lifecycleLock.Lock()
+	defer handle.lifecycleLock.Unlock()
+	if current, ok := d.tasks.Get(taskID); !ok || current != handle {
+		return drivers.ErrTaskNotFound
+	}
 
+	if !handle.pullOnly {
+		if err := handle.ownership.validate(handle.taskConfig, taskID, false); err != nil {
+			return err
+		}
+	}
 	var allocVMName string
 	if handle.taskConfig != nil && !handle.pullOnly {
-		allocVMName = vmName(handle.taskConfig.AllocID)
+		allocVMName = handle.ownership.VMName
 		if err := d.client.Stop(d.ctx, allocVMName, timeout); err != nil {
 			d.logger.Warn("failed to stop VM via virtualizer", "task_id", taskID, "error", err)
 		}
@@ -356,7 +398,17 @@ func (d *Driver) DestroyTask(taskID string, force bool) error {
 	if !ok {
 		return drivers.ErrTaskNotFound
 	}
+	handle.lifecycleLock.Lock()
+	defer handle.lifecycleLock.Unlock()
+	if current, ok := d.tasks.Get(taskID); !ok || current != handle {
+		return drivers.ErrTaskNotFound
+	}
 
+	if !handle.pullOnly {
+		if err := handle.ownership.validate(handle.taskConfig, taskID, false); err != nil {
+			return err
+		}
+	}
 	if handle.IsRunning() && !force {
 		return fmt.Errorf("cannot destroy running task")
 	}
@@ -373,7 +425,7 @@ func (d *Driver) DestroyTask(taskID string, force bool) error {
 	}
 
 	if handle.taskConfig != nil && !handle.pullOnly {
-		allocVMName := vmName(handle.taskConfig.AllocID)
+		allocVMName := handle.ownership.VMName
 		if err := d.client.Delete(d.ctx, allocVMName); err != nil {
 			d.logger.Warn("failed to delete VM via virtualizer", "task_id", taskID, "error", err)
 		}
@@ -381,7 +433,7 @@ func (d *Driver) DestroyTask(taskID string, force bool) error {
 		d.logger.Warn("task config missing while destroying task", "task_id", taskID)
 	}
 
-	d.tasks.Delete(taskID)
+	d.tasks.Delete(taskID, handle)
 	d.logger.Info("destroyed tart task", "task_id", taskID)
 	return nil
 }
@@ -447,6 +499,12 @@ func (d *Driver) ExecTaskStreaming(ctx context.Context, taskID string, opts *dri
 		return nil, drivers.ErrTaskNotFound
 	}
 
+	if handle.pullOnly {
+		return nil, fmt.Errorf("exec is not supported for pull-only tasks")
+	}
+	if err := handle.ownership.validate(handle.taskConfig, taskID, false); err != nil {
+		return nil, err
+	}
 	var taskCfg TaskConfig
 	if err := handle.taskConfig.DecodeDriverConfig(&taskCfg); err != nil {
 		return nil, fmt.Errorf("failed to decode driver config: %w", err)
@@ -462,8 +520,9 @@ func (d *Driver) ExecTaskStreaming(ctx context.Context, taskID string, opts *dri
 	}
 
 	vmConfig := VMConfig{
-		Driver: taskCfg,
-		Nomad:  handle.taskConfig,
+		Driver:    taskCfg,
+		Nomad:     handle.taskConfig,
+		ownership: handle.ownership,
 	}
 
 	exitCode, err := d.client.Exec(ctx, vmConfig, execOptions)
